@@ -4,7 +4,8 @@
 
 ### One desktop app for everyday control of installed BIQU Panda accessories
 
-[![Latest private build](https://img.shields.io/badge/build-0.1.2-d52b1e?style=for-the-badge)](../../releases/tag/v0.1.2)
+[![Download for macOS](https://img.shields.io/badge/Download-macOS-111111?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-macOS-arm64.dmg)
+[![Latest private build](https://img.shields.io/badge/build-0.1.2-d52b1e?style=flat-square)](../../releases/tag/v0.1.2)
 [![Extrusion Therapy](https://img.shields.io/badge/Extrusion%20Therapy-website-d52b1e?style=flat-square)](https://extrusiontherapy.com/)
 
 </div>
@@ -35,7 +36,7 @@ All device communication stays on the local network. Panda Control does not requ
 
 ### macOS
 
-1. Download the Apple-silicon DMG from the [v0.1.2 release](../../releases/tag/v0.1.2).
+1. Download the [latest Apple-silicon DMG](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-macOS-arm64.dmg). The stable link always points to the current release.
 2. Open the DMG and drag **Panda Control** to **Applications**.
 3. Launch Panda Control and allow Local Network access when macOS asks.
 
