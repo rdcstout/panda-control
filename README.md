@@ -5,6 +5,7 @@
 ### One desktop app for everyday control of installed BIQU Panda accessories
 
 [![Download for macOS](https://img.shields.io/badge/Download-macOS-111111?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-macOS-arm64.dmg)
+[![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Windows-x64.exe)
 [![Latest private build](https://img.shields.io/badge/build-0.1.2-d52b1e?style=flat-square)](../../releases/tag/v0.1.2)
 [![Extrusion Therapy](https://img.shields.io/badge/Extrusion%20Therapy-website-d52b1e?style=flat-square)](https://extrusiontherapy.com/)
 
@@ -42,7 +43,10 @@ All device communication stays on the local network. Panda Control does not requ
 
 The macOS build is signed with a Developer ID certificate and notarized by Apple.
 
-Windows packaging and hardware validation remain in progress and are not part of this private test release.
+### Windows
+
+1. Download the [latest 64-bit Windows installer](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Windows-x64.exe).
+2. Run the installer and launch **Panda Control** from the Start menu.
 
 ## Using Panda Control
 

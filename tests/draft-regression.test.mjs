@@ -60,3 +60,8 @@ test('macOS packages are re-signed with stable identities and declare Local Netw
   assert.match(macUuidScript, /LC_UUID/);
   assert.match(macUuidScript, /Panda Control:\$\{bundleId\}/);
 });
+
+test('Windows packages use the Panda Control icon and x64 NSIS installer', () => {
+  assert.match(packageConfig.scripts['dist:win'], /--win nsis --x64/);
+  assert.equal(packageConfig.build.win.icon, 'build/icon.ico');
+});
