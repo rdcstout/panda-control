@@ -1,0 +1,15 @@
+.DS_Store
+node_modules/
+dist/
+release/
+*.log
+
+# Local visual-review artifacts
+design-qa-comparison*.png
+implementation*.png
+
+# Local signing and packaging state
+*.dmg
+*.zip
+*.exe
+*.blockmap
