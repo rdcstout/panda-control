@@ -25,8 +25,6 @@ Panda Control gives you one desktop interface for managing your supported BIQU P
 - **Panda Vent:** Control lighting, colors, effects, brightness, and printer-follow behavior.
 - **Panda Control Vent:** Control vent position, automatic operation, vent lighting, and independent chamber lighting.
 
-All device communication stays on the local network. Panda Control does not require a cloud account.
-
 *Additional Panda devices may be supported as the developer gains access to them.*
 
 ## Installation
