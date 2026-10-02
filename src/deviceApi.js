@@ -148,6 +148,9 @@ const browserApi = {
   },
   openDevicePage(ip) { window.open(`http://${ip}/`, '_blank', 'noopener,noreferrer'); },
   openWebsite() { window.open('https://extrusiontherapy.com/', '_blank', 'noopener,noreferrer'); },
+  async openPrivacySettings() { return false; },
+  async checkForUpdates() { return { current: '0.1.3', latest: '0.1.3', releaseUrl: '', updateAvailable: false }; },
+  async openRelease(url) { if (url) window.open(url, '_blank', 'noopener,noreferrer'); },
 };
 
 export const deviceApi = window.pandaControl || browserApi;

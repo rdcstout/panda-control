@@ -1,12 +1,17 @@
 <div align="center">
 
+<img src="docs/assets/panda-control-hero.png" alt="Panda Control managing installed BIQU Panda accessories" width="100%">
+
 # Panda Control
 
 ### One desktop app for everyday control of installed BIQU Panda accessories
 
 [![Download for macOS](https://img.shields.io/badge/Download-macOS-111111?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-macOS-arm64.dmg)
 [![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Windows-x64.exe)
-[![Latest private build](https://img.shields.io/badge/build-0.1.2-d52b1e?style=flat-square)](../../releases/tag/v0.1.2)
+[![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=111111)](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Linux-x86_64.AppImage)
+[![Download DEB](https://img.shields.io/badge/Download-Linux%20DEB-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Linux-amd64.deb)
+
+[![Latest build](https://img.shields.io/badge/build-0.1.3-d52b1e?style=flat-square)](../../releases/tag/v0.1.3)
 [![Extrusion Therapy](https://img.shields.io/badge/Extrusion%20Therapy-website-d52b1e?style=flat-square)](https://extrusiontherapy.com/)
 
 </div>
@@ -48,6 +53,13 @@ The macOS build is signed with a Developer ID certificate and notarized by Apple
 1. Download the [latest 64-bit Windows installer](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Windows-x64.exe).
 2. Run the installer and launch **Panda Control** from the Start menu.
 
+### Linux
+
+Choose either package for a 64-bit x86 Linux system:
+
+- **AppImage:** Download the [latest AppImage](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Linux-x86_64.AppImage), mark it executable, and run it.
+- **Debian/Ubuntu:** Download the [latest DEB package](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Linux-amd64.deb) and install it with your normal package installer.
+
 ## Using Panda Control
 
 1. Complete the accessory's normal factory setup first so it is already joined to your network and bound to its printer.
@@ -55,6 +67,10 @@ The macOS build is signed with a Developer ID certificate and notarized by Apple
 3. Select the device tab, adjust its operational settings, and press **Save**.
 
 Scanning is always user-initiated. The app does not rescan the network automatically at startup.
+
+### Updates
+
+Open **About** to check for a new release or change the default weekly update check. Panda Control only checks this repository's public release page; downloading and installing an update always remains your choice.
 
 ## Troubleshooting
 

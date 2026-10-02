@@ -7,8 +7,12 @@ const networkSource = await readFile(new URL('../electron/network.cjs', import.m
 const stylesSource = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 const packageConfig = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const macReleaseScript = await readFile(new URL('../scripts/build-release-mac.sh', import.meta.url), 'utf8');
+const macSignScript = await readFile(new URL('../scripts/sign-mac.cjs', import.meta.url), 'utf8');
 const macAfterPack = await readFile(new URL('../scripts/after-pack.cjs', import.meta.url), 'utf8');
 const macUuidScript = await readFile(new URL('../scripts/stabilize-macos-executable-uuid.mjs', import.meta.url), 'utf8');
+const mainSource = await readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
+const preloadSource = await readFile(new URL('../electron/preload.cjs', import.meta.url), 'utf8');
+const windowGeometrySource = await readFile(new URL('../electron/windowGeometry.cjs', import.meta.url), 'utf8');
 
 test('device drafts carry a product discriminator before cross-product rendering', () => {
   assert.match(appSource, /product: 'status'/);
@@ -51,7 +55,9 @@ test('macOS packages are re-signed with stable identities and declare Local Netw
   assert.match(packageConfig.scripts['dist:mac'], /build-release-mac\.sh/);
   assert.match(packageConfig.build.mac.extendInfo.NSLocalNetworkUsageDescription, /local network/i);
   assert.equal(packageConfig.build.mac.hardenedRuntime, true);
-  assert.match(packageConfig.build.mac.identity, /Roger Stout \(W3WPVL2V32\)/);
+  assert.match(packageConfig.build.mac.identity, /^[A-F0-9]{40}$/);
+  assert.equal(packageConfig.build.mac.sign, 'scripts/sign-mac.cjs');
+  assert.match(macSignScript, /identityValidation: false/);
   assert.match(macAfterPack, /stabilize-macos-executable-uuid\.mjs/);
   assert.match(macReleaseScript, /notarytool submit/);
   assert.match(macReleaseScript, /stapler staple/);
@@ -61,7 +67,43 @@ test('macOS packages are re-signed with stable identities and declare Local Netw
   assert.match(macUuidScript, /Panda Control:\$\{bundleId\}/);
 });
 
+test('the Add-device dialog offers honest macOS Local Network permission recovery', () => {
+  assert.match(appSource, /deviceApi\.platform === 'darwin'/);
+  assert.match(appSource, /Can’t find your devices\?/);
+  assert.match(appSource, /select Local Network/);
+  assert.match(appSource, /turn Panda Control off and back on/);
+  assert.match(appSource, /Open Privacy &amp; Security/);
+  assert.match(preloadSource, /openPrivacySettings/);
+  assert.match(mainSource, /com\.apple\.settings\.PrivacySecurity\.extension/);
+  assert.doesNotMatch(mainSource, /Privacy_LocalNetwork/);
+});
+
+test('manual update failures remove Electron IPC wrapper noise', () => {
+  assert.match(appSource, /function ipcErrorMessage/);
+  assert.match(appSource, /Error invoking remote method/);
+  assert.match(appSource, /Could not check for updates/);
+});
+
 test('Windows packages use the Panda Control icon and x64 NSIS installer', () => {
   assert.match(packageConfig.scripts['dist:win'], /--win nsis --x64/);
   assert.equal(packageConfig.build.win.icon, 'build/icon.ico');
+});
+
+test('Linux packages use the Panda Control icon and ship AppImage plus DEB', () => {
+  assert.equal(packageConfig.build.linux.icon, 'build/icon-1024.png');
+  assert.equal(packageConfig.build.linux.executableName, 'panda-control');
+  assert.equal(packageConfig.desktopName, 'panda-control');
+  assert.equal(packageConfig.build.linux.syncDesktopName, true);
+  assert.deepEqual(packageConfig.build.linux.target, ['AppImage', 'deb']);
+  assert.match(packageConfig.scripts['dist:linux'], /--linux AppImage --x64/);
+  assert.match(packageConfig.scripts['dist:linux'], /build-linux-deb-native\.sh/);
+});
+
+test('Linux window resizing settles back to the square interface ratio', () => {
+  assert.match(mainSource, /installLinuxSquareResizeCorrection\(window, screen\)/);
+  assert.match(windowGeometrySource, /process\.platform !== 'linux'/);
+  assert.match(windowGeometrySource, /window\.on\('resize'/);
+  assert.match(windowGeometrySource, /window\.setContentSize\(squareSize, squareSize\)/);
+  assert.match(windowGeometrySource, /window\.isMaximized\(\)/);
+  assert.match(windowGeometrySource, /window\.isFullScreen\(\)/);
 });

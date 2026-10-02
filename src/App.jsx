@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ArrowsClockwise, CaretDown, CaretRight, Check, Fan, Fire, Gauge, Moon,
-  MusicNotes, Oven, Palette, Pause, Plus, Power, Printer, SlidersHorizontal,
+  Info, MusicNotes, Oven, Palette, Pause, Plus, Power, Printer, SlidersHorizontal,
   Sparkle, Sun, Thermometer, ThermometerHot, Timer, Trash, Warning, WarningCircle, Waves, X,
 } from '@phosphor-icons/react';
 import { deviceApi } from './deviceApi';
 import { deviceIdentityMatches, isKnownDevice, reconcileDevices } from './deviceRegistry';
+import { automaticUpdateCheckDue, shouldNotifyForUpdate } from './updatePolicy';
 
 const STORAGE_KEY = 'panda-control-devices-v1';
 const REMOVED_STORAGE_KEY = 'panda-control-removed-devices-v1';
 const APPEARANCE_KEY = 'panda-control-appearance-v1';
+const AUTO_UPDATES_KEY = 'panda-control-auto-updates-v1';
+const LAST_UPDATE_CHECK_KEY = 'panda-control-last-update-check-v1';
+const LAST_NOTIFIED_UPDATE_KEY = 'panda-control-last-notified-update-v1';
 
 function readSavedDevices() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch (_) { return []; }
@@ -17,6 +21,10 @@ function readSavedDevices() {
 
 function readRemovedDevices() {
   try { return new Set(JSON.parse(localStorage.getItem(REMOVED_STORAGE_KEY)) || []); } catch (_) { return new Set(); }
+}
+
+function ipcErrorMessage(problem) {
+  return String(problem?.message || problem || 'Unknown error').replace(/^Error invoking remote method '[^']+': Error:\s*/, '');
 }
 
 const rgbaToHex = value => /^#[0-9a-f]{8}$/i.test(value || '') ? value.slice(0, 7) : '#ffffff';
@@ -355,6 +363,7 @@ function AddDeviceDialog({ onClose, onAdd, onAddDiscovered, knownDevices }) {
   const [searchError, setSearchError] = useState('');
   const [results, setResults] = useState([]);
   const [addingId, setAddingId] = useState(null);
+  const [settingsError, setSettingsError] = useState('');
   const search = useCallback(async () => {
     setSearching(true); setSearchError('');
     try { setResults(await deviceApi.scanDevices()); }
@@ -367,6 +376,11 @@ function AddDeviceDialog({ onClose, onAdd, onAddDiscovered, knownDevices }) {
     setAddingId(device.id);
     try { await onAddDiscovered(device); }
     finally { setAddingId(null); }
+  };
+  const openPrivacySettings = async () => {
+    setSettingsError('');
+    try { await deviceApi.openPrivacySettings(); }
+    catch (_) { setSettingsError('Open System Settings → Privacy & Security → Local Network manually.'); }
   };
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}>
@@ -382,6 +396,7 @@ function AddDeviceDialog({ onClose, onAdd, onAddDiscovered, knownDevices }) {
         </div>
         <div className="manual-divider"><span>Or add by address</span></div>
         <form className="manual-add-form" onSubmit={submit}><label className="field-label" htmlFor="device-address">IP address or .local hostname</label><div className="manual-address-row"><input id="device-address" value={value} onChange={event => setValue(event.target.value)} placeholder="192.168.5.94" /><button type="submit" className="primary-button" disabled={busy || !value.trim()}>{busy && <Spinner />}Add Device</button></div>{error && <p className="form-error"><WarningCircle size={17} />{error}</p>}</form>
+        {deviceApi.platform === 'darwin' && <aside className="network-permission-help" aria-labelledby="network-permission-title"><div><strong id="network-permission-title">Can’t find your devices?</strong><p>Open Privacy &amp; Security, select Local Network, then turn Panda Control off and back on before searching again.</p>{settingsError && <p className="form-error"><WarningCircle size={17} />{settingsError}</p>}</div><button type="button" className="search-again-button" onClick={openPrivacySettings}>Open Privacy &amp; Security</button></aside>}
       </div>
     </div>
   );
@@ -389,6 +404,10 @@ function AddDeviceDialog({ onClose, onAdd, onAddDiscovered, knownDevices }) {
 
 function ConfirmDialog({ title, body, confirmLabel, onCancel, onConfirm }) {
   return <div className="modal-backdrop" role="presentation"><div className="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title"><h2 id="confirm-title">{title}</h2><p>{body}</p><div className="modal-actions"><button className="secondary-button" onClick={onCancel}>Cancel</button><button className="primary-button" onClick={onConfirm}>{confirmLabel}</button></div></div></div>;
+}
+
+function AboutDialog({ automaticUpdates, onAutomaticUpdates, updateResult, checking, error, onCheck, onOpenRelease, onClose }) {
+  return <div className="modal-backdrop" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><div className="modal-heading"><div><h2 id="about-title">Panda Control</h2><p>Updates are checked through the public GitHub release page. Downloads and installation stay under your control.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={20} /></button></div><label className="update-check-option"><input type="checkbox" checked={automaticUpdates} onChange={event => onAutomaticUpdates(event.target.checked)} /><span><strong>Check weekly for updates</strong><small>Quietly checks while Panda Control is running.</small></span></label><div className="update-dialog-actions"><button type="button" className="secondary-button" onClick={onCheck} disabled={checking}>{checking ? <><Spinner />Checking…</> : 'Check for Updates'}</button>{updateResult?.updateAvailable && <button type="button" className="primary-button" onClick={() => onOpenRelease(updateResult.releaseUrl)}>Download {updateResult.latest}</button>}</div>{updateResult && !updateResult.updateAvailable && <p className="update-status" role="status">Panda Control {updateResult.current} is up to date.</p>}{error && <p className="form-error"><WarningCircle size={17} />{error}</p>}</div></div>;
 }
 
 export function App() {
@@ -407,6 +426,11 @@ export function App() {
   const [infoOpen, setInfoOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [automaticUpdates, setAutomaticUpdates] = useState(() => localStorage.getItem(AUTO_UPDATES_KEY) !== 'false');
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updateResult, setUpdateResult] = useState(null);
+  const [updateError, setUpdateError] = useState('');
   const [toast, setToast] = useState(null);
   const [appearance, setAppearance] = useState(() => localStorage.getItem(APPEARANCE_KEY) || 'dark');
   const selected = devices.find(device => device.id === selectedId) || devices[0] || null;
@@ -419,6 +443,37 @@ export function App() {
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(devices)); if (!selectedId && devices[0]) setSelectedId(devices[0].id); }, [devices, selectedId]);
   useEffect(() => { localStorage.setItem(REMOVED_STORAGE_KEY, JSON.stringify([...removedIds])); }, [removedIds]);
   useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+  useEffect(() => { localStorage.setItem(AUTO_UPDATES_KEY, String(automaticUpdates)); }, [automaticUpdates]);
+
+  const checkForUpdates = useCallback(async ({ automatic = false } = {}) => {
+    if (!automatic) { setCheckingUpdates(true); setUpdateError(''); }
+    try {
+      const result = await deviceApi.checkForUpdates();
+      setUpdateResult(result);
+      const lastNotified = localStorage.getItem(LAST_NOTIFIED_UPDATE_KEY);
+      if (result.updateAvailable && (!automatic || shouldNotifyForUpdate(result.latest, lastNotified))) {
+        setToast({ kind: 'success', message: `Panda Control ${result.latest} is available`, action: 'View Release', releaseUrl: result.releaseUrl });
+        if (automatic) localStorage.setItem(LAST_NOTIFIED_UPDATE_KEY, result.latest);
+      }
+      return result;
+    } catch (problem) {
+      if (!automatic) setUpdateError(`Could not check for updates: ${ipcErrorMessage(problem)}`);
+      return null;
+    } finally { if (!automatic) setCheckingUpdates(false); }
+  }, []);
+
+  useEffect(() => {
+    if (!automaticUpdates) return undefined;
+    const checkWhenDue = () => {
+      const lastAttempt = Number(localStorage.getItem(LAST_UPDATE_CHECK_KEY) || 0);
+      if (!automaticUpdateCheckDue({ enabled: automaticUpdates, lastAttempt })) return;
+      localStorage.setItem(LAST_UPDATE_CHECK_KEY, String(Date.now()));
+      checkForUpdates({ automatic: true });
+    };
+    const initial = setTimeout(checkWhenDue, 15000);
+    const interval = setInterval(checkWhenDue, 60 * 60 * 1000);
+    return () => { clearTimeout(initial); clearInterval(interval); };
+  }, [automaticUpdates, checkForUpdates]);
 
   const mergeDevices = useCallback(incoming => {
     const allowed = incoming.filter(device => !removedIds.has(device.id) && !removedIds.has(device.hardwareId));
@@ -557,6 +612,7 @@ export function App() {
           {selected && <span className={`toolbar-status ${error ? 'offline' : ''}`}><i />{error ? 'Offline' : 'Online'}</span>}
           <AppButton icon={scanning ? Spinner : ArrowsClockwise} onClick={scan} disabled={scanning} aria-label={scanning ? 'Scanning for devices' : 'Scan for devices'}>{scanning ? 'Scanning' : 'Scan'}</AppButton>
           <AppButton icon={Plus} onClick={() => setAddOpen(true)} aria-label="Add a device">Add</AppButton>
+          <AppButton icon={Info} onClick={() => setAboutOpen(true)} aria-label="About and updates">About</AppButton>
           <button className="appearance-button" onClick={() => setAppearance(current => current === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${appearance === 'dark' ? 'light' : 'dark'} mode`}>{appearance === 'dark' ? <Moon size={18} /> : <Sun size={18} />}<span>{appearance === 'dark' ? 'Dark' : 'Light'}</span><CaretDown size={13} /></button>
           <button className="save-button" onClick={() => save().catch(() => {})} disabled={!dirty || saving || !state}>{saving ? <Spinner /> : <Check size={17} weight="bold" />}Save</button>
         </div>
@@ -576,7 +632,8 @@ export function App() {
       {addOpen && <AddDeviceDialog onClose={() => setAddOpen(false)} onAdd={addDevice} onAddDiscovered={addDiscoveredDevice} knownDevices={devices} />}
       {confirmReset && <ConfirmDialog title="Restore lighting defaults?" body="This resets Panda Status lighting modes, brightness, and colors. Network and printer setup are not affected." confirmLabel="Restore Defaults" onCancel={() => setConfirmReset(false)} onConfirm={resetStatus} />}
       {confirmRemove && <ConfirmDialog title={`Remove ${selected?.name || 'device'}?`} body="This removes the device from Panda Control only. It does not change the device, its network setup, or its printer connection." confirmLabel="Remove Device" onCancel={() => setConfirmRemove(false)} onConfirm={removeDevice} />}
-      {toast && <div className={`toast ${toast.kind}`} role="status">{toast.kind === 'success' ? <Check size={18} /> : <WarningCircle size={18} />}{toast.message}</div>}
+      {aboutOpen && <AboutDialog automaticUpdates={automaticUpdates} onAutomaticUpdates={setAutomaticUpdates} updateResult={updateResult} checking={checkingUpdates} error={updateError} onCheck={() => checkForUpdates()} onOpenRelease={url => deviceApi.openRelease(url)} onClose={() => setAboutOpen(false)} />}
+      {toast && <div className={`toast ${toast.kind}`} role="status">{toast.kind === 'success' ? <Check size={18} /> : <WarningCircle size={18} />}{toast.message}{toast.action && <button type="button" onClick={() => deviceApi.openRelease(toast.releaseUrl)}>{toast.action}</button>}</div>}
     </div>
   );
 }
