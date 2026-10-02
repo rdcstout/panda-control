@@ -27,53 +27,21 @@ Panda Control gives you one desktop interface for managing your supported BIQU P
 
 *Additional Panda devices may be supported as the developer gains access to them.*
 
-## Installation
-
-### macOS
-
-1. Download the [latest Apple-silicon DMG](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-macOS-arm64.dmg). The stable link always points to the current release.
-2. Open the DMG and drag **Panda Control** to **Applications**.
-3. Launch Panda Control and allow Local Network access when macOS asks.
-
-The macOS build is signed with a Developer ID certificate and notarized by Apple.
-
-### Windows
-
-1. Download the [latest 64-bit Windows installer](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Windows-x64.exe).
-2. Run the installer and launch **Panda Control** from the Start menu.
-
-### Linux
-
-Choose either package for a 64-bit x86 Linux system:
-
-- **AppImage:** Download the [latest AppImage](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Linux-x86_64.AppImage), mark it executable, and run it.
-- **Debian/Ubuntu:** Download the [latest DEB package](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Linux-amd64.deb) and install it with your normal package installer.
-
-## Using Panda Control
+## Get started
 
 1. Complete the accessory's normal factory setup first so it is already joined to your network and bound to its printer.
-2. Open Panda Control and press **Scan**.
-3. Select the device tab, adjust its operational settings, and press **Save**.
+2. Download Panda Control for your platform and follow the [installation guide](docs/INSTALLATION.md).
+3. Open Panda Control and press **Scan**.
+4. Select the device tab, adjust its operational settings, and press **Save**.
 
-Scanning is always user-initiated. The app does not rescan the network automatically at startup.
+## Help and project links
 
-### Updates
-
-Open **About** to check for a new release or change the default weekly update check. Panda Control only checks this repository's public release page; downloading and installing an update always remains your choice.
-
-## Troubleshooting
-
-### No devices are found on macOS
-
-Open **System Settings → Privacy & Security → Local Network** and make sure Panda Control is enabled. Then return to the app and press **Scan**.
-
-### A device moved to a new IP address
-
-Press **Scan**. Version 0.1.2 and later match supported devices by hardware identity and update the saved address instead of adding a duplicate.
-
-### A device is still unavailable
-
-Confirm the Mac and the accessory are on the same local network, verify the accessory is powered on, and try its IP address through **Add**.
+- [Installation](docs/INSTALLATION.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Latest release notes](../../releases/latest)
+- [Report a bug](../../issues)
+- [Report a security issue privately](../../security/advisories/new)
+- [Panda Control website](https://extrusiontherapy.com/SoftwarePandaControl)
 
 ## Support future tools
 
