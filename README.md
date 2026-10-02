@@ -16,27 +16,18 @@
 
 </div>
 
-Panda Control is a free Extrusion Therapy workshop tool for managing Panda accessories after their normal factory setup is complete. It provides a consistent desktop interface for Panda Status, Panda Breath, stock Panda Vent, and Panda Control Vent firmware.
+Panda Control gives you one desktop interface for managing your supported BIQU Panda devices—without remembering individual IP addresses.
 
 ## What it does
 
-- Finds supported Panda devices on the current local network when you press **Scan**
-- Remembers added devices between launches
-- Recognizes the same physical device after its DHCP address changes
-- Keeps multiple units of the same product separate by hardware identity
-- Provides normal operational controls without exposing Wi-Fi, printer binding, factory reset, or firmware-update setup
-- Distinguishes stock Panda Vent from Panda Control Vent firmware
+- **Panda Status:** Control brightness, music mode, and printer-status colors.
+- **Panda Breath:** Control power, operating modes, temperature settings, and filament drying.
+- **Panda Vent:** Control lighting, colors, effects, brightness, and printer-follow behavior.
+- **Panda Control Vent:** Control vent position, automatic operation, vent lighting, and independent chamber lighting.
 
 All device communication stays on the local network. Panda Control does not require a cloud account.
 
-## Supported devices
-
-| Device | Operational controls |
-| --- | --- |
-| Panda Status | Music/H2D mode, brightness, idle/printing/error colors |
-| Panda Breath | Power, operating mode, temperature thresholds, filament drying |
-| Panda Vent | Lighting modes, effects, state colors, brightness, speed, follow behavior |
-| Panda Control Vent | Vent position, automatic policy, vent lighting, chamber lighting |
+*Additional Panda devices may be supported as the developer gains access to them.*
 
 ## Installation
 
