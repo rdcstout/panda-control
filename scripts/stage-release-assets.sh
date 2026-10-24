@@ -8,23 +8,23 @@ stage_dir="${1:-$project_root/release/publish}"
 
 mkdir -p "$stage_dir"
 
-declare -A stable_names=(
-  ["Panda-Control-${version}-macOS-arm64.dmg"]="Panda-Control-macOS-arm64.dmg"
-  ["Panda-Control-${version}-Windows-x64.exe"]="Panda-Control-Windows-x64.exe"
-  ["Panda-Control-${version}-Linux-x86_64.AppImage"]="Panda-Control-Linux-x86_64.AppImage"
-  ["Panda-Control-${version}-Linux-amd64.deb"]="Panda-Control-Linux-amd64.deb"
-)
-
-for versioned in "${!stable_names[@]}"; do
+copy_stable_asset() {
+  versioned="$1"
+  stable="$2"
   source_path="$stage_dir/$versioned"
-  stable_path="$stage_dir/${stable_names[$versioned]}"
+  stable_path="$stage_dir/$stable"
   if [[ ! -f "$source_path" ]]; then
     echo "Missing release asset: $source_path" >&2
     exit 1
   fi
   cp -p "$source_path" "$stable_path"
   cmp -s "$source_path" "$stable_path"
-done
+}
+
+copy_stable_asset "Panda-Control-${version}-macOS-arm64.dmg" "Panda-Control-macOS-arm64.dmg"
+copy_stable_asset "Panda-Control-${version}-Windows-x64.exe" "Panda-Control-Windows-x64.exe"
+copy_stable_asset "Panda-Control-${version}-Linux-x86_64.AppImage" "Panda-Control-Linux-x86_64.AppImage"
+copy_stable_asset "Panda-Control-${version}-Linux-amd64.deb" "Panda-Control-Linux-amd64.deb"
 
 (
   cd "$stage_dir"
