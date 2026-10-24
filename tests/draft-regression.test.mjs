@@ -149,6 +149,7 @@ test('write responses are scoped to their originating device and verified before
 
 test('Windows packages use the Panda Control icon and x64 NSIS installer', () => {
   assert.match(packageConfig.scripts['dist:win'], /--win nsis --x64/);
+  assert.match(packageConfig.scripts['dist:win'], /--publish never/);
   assert.ok(
     packageConfig.scripts['dist:win'].indexOf('npm run build') <
       packageConfig.scripts['dist:win'].indexOf('npm run test'),
@@ -164,6 +165,7 @@ test('Linux packages use the Panda Control icon and ship AppImage plus DEB', () 
   assert.equal(packageConfig.build.linux.syncDesktopName, true);
   assert.deepEqual(packageConfig.build.linux.target, ['AppImage', 'deb']);
   assert.match(packageConfig.scripts['dist:linux'], /--linux AppImage --x64/);
+  assert.match(packageConfig.scripts['dist:linux'], /--publish never/);
   assert.match(packageConfig.scripts['dist:linux'], /build-linux-deb-native\.sh/);
   assert.ok(
     packageConfig.scripts['dist:linux'].indexOf('npm run build') <

@@ -21,7 +21,7 @@ fi
 cd "$project_dir"
 npm run build
 npm run test
-CSC_NAME="$signing_identity" ./node_modules/.bin/electron-builder --mac dmg --arm64
+CSC_NAME="$signing_identity" ./node_modules/.bin/electron-builder --mac dmg --arm64 --publish never
 
 version="$(node -p "require('./package.json').version")"
 app_path="release/mac-arm64/Panda Control.app"
