@@ -7,8 +7,8 @@ const {
   scanDevices,
 } = require('./network.cjs');
 const { normalizeTarget } = require('./protocol.cjs');
-const { compareVersions } = require('./update.cjs');
-const { installLinuxSquareResizeCorrection } = require('./windowGeometry.cjs');
+const { compareVersions, isAllowedReleaseUrl, releaseHasCompatibleAsset } = require('./update.cjs');
+const { installLinuxSquareResizeCorrection, installSquareMaximizeCorrection } = require('./windowGeometry.cjs');
 
 const WEBSITE = 'https://extrusiontherapy.com/';
 const RELEASES_API = 'https://api.github.com/repos/rdcstout/panda-control/releases/latest';
@@ -37,11 +37,14 @@ function createWindow() {
   });
   window.setAspectRatio(1);
   installLinuxSquareResizeCorrection(window, screen);
+  installSquareMaximizeCorrection(window, screen);
   window.setMenuBarVisibility(false);
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url === WEBSITE) shell.openExternal(url);
     return { action: 'deny' };
   });
+  window.webContents.on('will-navigate', event => event.preventDefault());
+  window.webContents.on('will-attach-webview', event => event.preventDefault());
   window.loadFile(path.join(__dirname, '..', 'dist', 'client', 'index.html'));
 }
 
@@ -63,12 +66,20 @@ ipcMain.handle('panda:update-check', async () => {
   const current = app.getVersion();
   const latest = String(release.tag_name || '').replace(/^v/i, '');
   const releaseUrl = String(release.html_url || '');
-  if (!releaseUrl.startsWith(RELEASES_PAGE)) throw new Error('GitHub returned an unexpected release address.');
-  return { current, latest, releaseUrl, updateAvailable: compareVersions(latest, current) > 0 };
+  if (!isAllowedReleaseUrl(releaseUrl)) throw new Error('GitHub returned an unexpected release address.');
+  const newer = compareVersions(latest, current) > 0;
+  const compatibleAsset = releaseHasCompatibleAsset(release.assets, process.platform, process.arch);
+  return {
+    current,
+    latest,
+    releaseUrl,
+    updateAvailable: newer && compatibleAsset,
+    compatibilityIssue: newer && !compatibleAsset,
+  };
 });
 ipcMain.handle('panda:update-open', (_event, url) => {
   const target = String(url || '');
-  if (!target.startsWith(RELEASES_PAGE)) throw new Error('That update address is not allowed.');
+  if (!isAllowedReleaseUrl(target)) throw new Error('That update address is not allowed.');
   return shell.openExternal(target);
 });
 

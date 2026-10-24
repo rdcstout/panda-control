@@ -1,6 +1,6 @@
 {
   "name": "panda-control",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A free Extrusion Therapy workshop tool for managing installed BIQU Panda accessories.",
   "desktopName": "panda-control",
   "author": "Extrusion Therapy",
@@ -20,12 +20,12 @@
     "test:sites": "node --test tests/sites-worker.test.mjs"
   },
   "dependencies": {
-    "ws": "^8.21.3"
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@phosphor-icons/react": "^2.1.10",
     "@vitejs/plugin-react": "5.0.4",
-    "electron": "43.7.7",
+    "electron": "43.8.3",
     "electron-builder": "26.15.3",
     "react": "19.2.0",
     "react-dom": "19.2.0",
@@ -43,6 +43,12 @@
       "electron/**",
       "dist/client/**",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "docs/THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      }
     ],
     "mac": {
       "category": "public.app-category.utilities",

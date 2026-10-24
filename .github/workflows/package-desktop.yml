@@ -1,0 +1,53 @@
+name: Package Windows and Linux
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run dist:win
+      - name: Stage Windows installer
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          Copy-Item "release/Panda Control Setup $version.exe" "release/Panda-Control-$version-Windows-x64.exe"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panda-control-windows-x64
+          path: release/Panda-Control-*-Windows-x64.exe
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run dist:linux
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panda-control-linux-x64
+          path: |
+            release/Panda-Control-*-Linux-x86_64.AppImage
+            release/Panda-Control-*-Linux-amd64.deb
+          if-no-files-found: error

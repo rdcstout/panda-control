@@ -11,7 +11,7 @@
 [![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=111111)](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Linux-x86_64.AppImage)
 [![Download DEB](https://img.shields.io/badge/Download-Linux%20DEB-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Linux-amd64.deb)
 
-[![Latest build](https://img.shields.io/badge/build-0.1.3-d52b1e?style=flat-square)](../../releases/tag/v0.1.3)
+[![Latest build](https://img.shields.io/badge/build-0.1.4-d52b1e?style=flat-square)](../../releases/tag/v0.1.4)
 [![Extrusion Therapy](https://img.shields.io/badge/Extrusion%20Therapy-website-d52b1e?style=flat-square)](https://extrusiontherapy.com/)
 
 </div>
@@ -42,6 +42,7 @@ Panda Control gives you one desktop interface for managing your supported BIQU P
 - [Report a bug](../../issues)
 - [Report a security issue privately](../../security/advisories/new)
 - [Panda Control website](https://extrusiontherapy.com/SoftwarePandaControl)
+- [Third-party notices](docs/THIRD_PARTY_NOTICES.md)
 
 ## Support future tools
 

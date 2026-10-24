@@ -8,6 +8,7 @@ const {
   normalizeTarget,
   sanitizeControlVentState,
   sanitizeState,
+  validateControlVentFilamentRules,
   validateControlVentLighting,
   validateControlVentSettings,
   validateCommand,
@@ -15,9 +16,9 @@ const {
 const { parseNeighborMac } = require('../electron/network.cjs');
 
 test('normalizes macOS, Linux, and Windows neighbor MAC formats', () => {
-  assert.equal(parseNeighborMac('? (192.168.4.34) at 10:51:db:b4:f:40 on en0'), '10:51:db:b4:0f:40');
-  assert.equal(parseNeighborMac('192.168.4.34 dev wlan0 lladdr 10:51:db:b4:0f:40 REACHABLE'), '10:51:db:b4:0f:40');
-  assert.equal(parseNeighborMac('  192.168.4.34          10-51-db-b4-0f-40     dynamic'), '10:51:db:b4:0f:40');
+  assert.equal(parseNeighborMac('? (192.168.1.34) at 02:00:00:00:0:f on en0'), '02:00:00:00:00:0f');
+  assert.equal(parseNeighborMac('192.168.1.34 dev wlan0 lladdr 02:00:00:00:00:0f REACHABLE'), '02:00:00:00:00:0f');
+  assert.equal(parseNeighborMac('  192.168.1.34          02-00-00-00-00-0f     dynamic'), '02:00:00:00:00:0f');
 });
 
 test('recognizes only mapped Panda control surfaces', () => {
@@ -39,22 +40,33 @@ test('recognizes only mapped Panda control surfaces', () => {
 test('sanitizes Panda Control Vent operational state without setup data', () => {
   const result = sanitizeControlVentState({
     api_version: 2, firmware: '0.1.0-rc.6', mode: 'auto',
-    vent: { target: 'closed', running: false },
-    printer: { connected: true, state: 'idle', bed_temperature_c: 32, bed_target_c: 0 },
+    vent: { target: 'closed', running: false, calibrating: true },
+    printer: { connected: true, connection: 'live', state: 'idle', source: 'bambu', material: 'PLA', chamber_light_on: true, bed_temperature_c: 32, bed_target_c: 0 },
+    wifi: { state: 'station', ssid: 'WORKSHOP', ip: '192.168.1.94' },
     policy: { bed_seal_c: 85, bed_close_c: 35 },
   }, {
     zones: {
       vent: { enabled: true, brightness: 128 },
       chamber: { enabled: true, brightness: 255, dim_idle: true, follow_printer_light: true },
     },
-  }, { automation_mode: 'simple', bed_seal_c: 85, bed_open_c: 45, bed_close_c: 35 });
+  }, { automation_mode: 'advanced', bed_seal_c: 85, bed_open_c: 45, bed_close_c: 35 }, {
+    rules: [{ name: 'PLA', seal: false }, { name: 'ABS', seal: true }],
+  });
   assert.equal(result.product, 'control-vent');
   assert.equal(result.firmware, '0.1.0-rc.6');
   assert.equal(result.ventTarget, 'closed');
-  assert.deepEqual(result.policy, { automationMode: 'simple', bedSeal: 85, bedOpen: 45, bedClose: 35 });
+  assert.equal(result.ventCalibrating, true);
+  assert.equal(result.printerConnection, 'live');
+  assert.equal(result.printerSource, 'bambu');
+  assert.equal(result.material, 'PLA');
+  assert.equal(result.chamberLightOn, true);
+  assert.deepEqual(result.policy, { automationMode: 'advanced', bedSeal: 85, bedOpen: 45, bedClose: 35 });
+  assert.deepEqual(result.filamentRules, [{ name: 'PLA', seal: false }, { name: 'ABS', seal: true }]);
   assert.equal(result.lighting.vent.brightness, 128);
   assert.equal(result.lighting.chamber.dimIdle, true);
   assert.equal(result.lighting.chamber.followPrinterLight, true);
+  assert.equal(result.wifiState, 'Connected · WORKSHOP');
+  assert.equal(result.wifiIp, '192.168.1.94');
 });
 
 test('validates Panda Control Vent operational settings and two-zone lighting', () => {
@@ -74,6 +86,23 @@ test('validates Panda Control Vent operational settings and two-zone lighting', 
   assert.equal(validated.zones.chamber.dim_idle, true);
   assert.equal(validated.zones.chamber.follow_printer_light, true);
   assert.throws(() => validateControlVentSettings({ automationMode: 'simple', bedSeal: 85, bedOpen: 30, bedClose: 35 }), /higher than close/);
+  assert.throws(() => validateControlVentSettings({ automationMode: 'simple', bedSeal: 39, bedOpen: 45, bedClose: 35 }), /between 40 and 120/);
+  assert.throws(() => validateControlVentSettings({ automationMode: 'simple', bedSeal: 85, bedOpen: 19, bedClose: 10 }), /between 20 and 120/);
+  assert.throws(() => validateControlVentSettings({ automationMode: 'simple', bedSeal: 85, bedOpen: 120, bedClose: 111 }), /between 0 and 110/);
+});
+
+test('validates Panda Control Vent advanced material rules', () => {
+  assert.deepEqual(validateControlVentFilamentRules({ rules: [
+    { name: ' pla ', seal: false },
+    { name: 'petg-cf', seal: true },
+  ] }), { rules: [
+    { name: 'PLA', seal: false },
+    { name: 'PETG-CF', seal: true },
+  ] });
+  assert.throws(() => validateControlVentFilamentRules({ rules: [{ name: '', seal: true }] }), /between 1 and 11/);
+  assert.throws(() => validateControlVentFilamentRules({ rules: [{ name: 'POLYCARBONATE', seal: true }] }), /between 1 and 11/);
+  assert.throws(() => validateControlVentFilamentRules({ rules: [{ name: 'PLA®', seal: false }] }), /only letters/);
+  assert.throws(() => validateControlVentFilamentRules({ rules: Array.from({ length: 21 }, (_, index) => ({ name: `M${index}`, seal: false })) }), /No more than 20/);
 });
 
 test('restricts connections to private IPv4 and local hostnames', () => {

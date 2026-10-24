@@ -13,6 +13,7 @@ const macUuidScript = await readFile(new URL('../scripts/stabilize-macos-executa
 const mainSource = await readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
 const preloadSource = await readFile(new URL('../electron/preload.cjs', import.meta.url), 'utf8');
 const windowGeometrySource = await readFile(new URL('../electron/windowGeometry.cjs', import.meta.url), 'utf8');
+const thirdPartyNotices = await readFile(new URL('../docs/THIRD_PARTY_NOTICES.md', import.meta.url), 'utf8');
 
 test('device drafts carry a product discriminator before cross-product rendering', () => {
   assert.match(appSource, /product: 'status'/);
@@ -23,7 +24,10 @@ test('device drafts carry a product discriminator before cross-product rendering
 
 test('live polling uses current dirty state and does not overwrite unsaved edits', () => {
   assert.match(appSource, /const dirtyRef = useRef\(dirty\)/);
-  assert.match(appSource, /if \(updateDraft \|\| !dirtyRef\.current\)/);
+  assert.match(appSource, /updateDraft \|\| !dirtyRef\.current/);
+  assert.match(appSource, /isLatestDeviceRequest\(requestId, latestReadRef\.current\.get\(device\.id\)\)/);
+  assert.match(appSource, /ownsActiveDraft\(requestKey, selectedKeyRef\.current\)/);
+  assert.match(appSource, /\[selectedKey, refresh\]/);
 });
 
 test('removed devices stay ignored by automatic scans and can be explicitly restored', () => {
@@ -37,6 +41,41 @@ test('removed devices stay ignored by automatic scans and can be explicitly rest
 test('Panda Control Vent writes include the firmware local-control headers', () => {
   assert.match(networkSource, /'X-Dragon-Auth': 'web'/);
   assert.match(networkSource, /'X-DragonBreath-Auth': 'web'/);
+});
+
+test('Panda Control Vent advanced automation reads and writes material rules', () => {
+  assert.match(networkSource, /httpJson\(target, '\/api\/v2\/filament'\)/);
+  assert.match(networkSource, /httpJson\(target, '\/api\/v2\/filament', \{ method: 'POST'/);
+  assert.match(appSource, /label="Advanced automation"/);
+  assert.match(appSource, /automation\.openLabel/);
+  assert.match(appSource, /automation\.sealLabel/);
+  assert.match(appSource, /automation\.closeLabel/);
+  assert.match(appSource, /automation\.materialHelp/);
+  assert.match(appSource, /commands\.push\(\{ filament:/);
+});
+
+test('Panda Control Vent polling preserves the embedded web interface connection budget', () => {
+  assert.match(networkSource, /CONTROL_VENT_CONFIG_TTL_MS = 15000/);
+  assert.match(networkSource, /controlVentReadInFlight\.has\(target\)/);
+  assert.match(networkSource, /const lighting = await httpJson\(target, '\/api\/v2\/lighting'\)/);
+  assert.match(networkSource, /const settings = await httpJson\(target, '\/api\/v2\/settings'\)/);
+  assert.match(networkSource, /const filament = await httpJson\(target, '\/api\/v2\/filament'\)/);
+  assert.doesNotMatch(networkSource, /Promise\.all\(\[\s*httpJson\(target, '\/api\/v2\/state'/);
+  assert.match(networkSource, /collectControlVentState\(target, \{ forceConfig: true \}\)/);
+});
+
+test('Panda Control Vent matches firmware labels and keeps cooldown controls in advanced mode', () => {
+  assert.match(appSource, /\{advanced && <section className="section-block cooldown-section"/);
+  assert.match(appSource, /automation\.openLabel/);
+  assert.match(appSource, /automation\.closeLabel/);
+  assert.doesNotMatch(appSource, /Keep Chamber Sealed|Close After Cooldown/);
+  assert.match(appSource, /Following the active printer and automatic policy\./);
+});
+
+test('the About control does not crowd the device and online status toolbar', () => {
+  assert.match(appSource, /className="brand-about-button"/);
+  const toolbar = appSource.match(/<div className="toolbar-actions">([\s\S]*?)<\/div>\s*<\/header>/)?.[1] || '';
+  assert.doesNotMatch(toolbar, /About and updates/);
 });
 
 test('full network discovery runs only from explicit user actions', () => {
@@ -78,10 +117,34 @@ test('the Add-device dialog offers honest macOS Local Network permission recover
   assert.doesNotMatch(mainSource, /Privacy_LocalNetwork/);
 });
 
+test('dialogs escape the transformed scroll canvas and provide keyboard modal behavior', () => {
+  assert.match(appSource, /import \{ createPortal \} from 'react-dom'/);
+  assert.match(appSource, /function useModalBehavior/);
+  assert.match(appSource, /event\.key === 'Escape'/);
+  assert.match(appSource, /appShell\.inert = true/);
+  assert.match(appSource, /createPortal\(/);
+});
+
+test('Panda Control Vent lighting exposes selected states and percentage sliders', () => {
+  assert.match(appSource, /role="tablist" aria-label="Lighting zone"/);
+  assert.match(appSource, /aria-selected=\{zoneName === 'vent'\}/);
+  assert.match(appSource, /aria-pressed=\{!printerMode\}/);
+  assert.match(appSource, /max="100" value=\{byteToPercent\(zone\.brightness\)\}/);
+  assert.match(appSource, /max="100" value=\{byteToPercent\(zone\.speed\)\}/);
+});
+
 test('manual update failures remove Electron IPC wrapper noise', () => {
-  assert.match(appSource, /function ipcErrorMessage/);
-  assert.match(appSource, /Error invoking remote method/);
+  assert.match(appSource, /ipcErrorMessage/);
+  assert.match(appSource, /setUpdateResult\(null\)/);
   assert.match(appSource, /Could not check for updates/);
+});
+
+test('write responses are scoped to their originating device and verified before success', () => {
+  assert.match(appSource, /const operationKey = selectedKey/);
+  assert.match(appSource, /deviceKey: operationKey/);
+  assert.match(appSource, /draftsEquivalent\(requestedDraft, returnedDraft\)/);
+  assert.match(appSource, /The device returned different settings/);
+  assert.match(appSource, /controlVentCommandSatisfied\(command, next\)/);
 });
 
 test('Windows packages use the Panda Control icon and x64 NSIS installer', () => {
@@ -97,6 +160,17 @@ test('Linux packages use the Panda Control icon and ship AppImage plus DEB', () 
   assert.deepEqual(packageConfig.build.linux.target, ['AppImage', 'deb']);
   assert.match(packageConfig.scripts['dist:linux'], /--linux AppImage --x64/);
   assert.match(packageConfig.scripts['dist:linux'], /build-linux-deb-native\.sh/);
+});
+
+test('release packages include third-party notices', () => {
+  assert.deepEqual(packageConfig.build.extraResources, [{
+    from: 'docs/THIRD_PARTY_NOTICES.md',
+    to: 'THIRD_PARTY_NOTICES.md',
+  }]);
+  assert.match(thirdPartyNotices, /React and React DOM 19\.2\.0/);
+  assert.match(thirdPartyNotices, /Phosphor Icons for React 2\.1\.10/);
+  assert.match(thirdPartyNotices, /ws 8\.22\.0/);
+  assert.match(thirdPartyNotices, /MIT License/);
 });
 
 test('Linux window resizing settles back to the square interface ratio', () => {

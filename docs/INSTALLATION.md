@@ -15,6 +15,8 @@ The macOS build is signed with a Developer ID certificate and notarized by Apple
 1. Download the [latest 64-bit Windows installer](https://github.com/rdcstout/panda-control/releases/latest/download/Panda-Control-Windows-x64.exe).
 2. Run the installer and launch **Panda Control** from the Start menu.
 
+The Windows build is not code-signed, so Windows may show an expected publisher warning before installation.
+
 ## Linux
 
 Choose either package for a 64-bit x86 Linux system:

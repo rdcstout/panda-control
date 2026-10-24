@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import updateModule from '../electron/update.cjs';
 import { automaticUpdateCheckDue, shouldNotifyForUpdate, UPDATE_INTERVAL_MS } from '../src/updatePolicy.js';
 
-const { compareVersions, versionParts } = updateModule;
+const { compareVersions, expectedStableAsset, isAllowedReleaseUrl, releaseHasCompatibleAsset, versionParts } = updateModule;
 
 test('release versions compare numerically rather than lexically', () => {
   assert.equal(compareVersions('1.10.0', '1.9.0'), 1);
@@ -34,4 +34,21 @@ test('automatic notifications are deduplicated by release version', () => {
   assert.equal(shouldNotifyForUpdate('0.1.4', ''), true);
   assert.equal(shouldNotifyForUpdate('0.1.4', '0.1.4'), false);
   assert.equal(shouldNotifyForUpdate('0.1.5', '0.1.4'), true);
+});
+
+test('update eligibility requires the stable asset for the running platform', () => {
+  assert.equal(expectedStableAsset('darwin', 'arm64'), 'Panda-Control-macOS-arm64.dmg');
+  assert.equal(expectedStableAsset('win32', 'x64'), 'Panda-Control-Windows-x64.exe');
+  assert.equal(expectedStableAsset('linux', 'x64'), 'Panda-Control-Linux-x86_64.AppImage');
+  assert.equal(expectedStableAsset('linux', 'arm64'), null);
+  assert.equal(releaseHasCompatibleAsset([{ name: 'Panda-Control-macOS-arm64.dmg' }], 'darwin', 'arm64'), true);
+  assert.equal(releaseHasCompatibleAsset([{ name: 'Panda-Control-Windows-x64.exe' }], 'darwin', 'arm64'), false);
+  assert.equal(releaseHasCompatibleAsset([], 'win32', 'x64'), false);
+});
+
+test('release navigation accepts only this repository release path', () => {
+  assert.equal(isAllowedReleaseUrl('https://github.com/rdcstout/panda-control/releases/tag/v0.1.4'), true);
+  assert.equal(isAllowedReleaseUrl('https://github.com/rdcstout/panda-control/releases/latest'), true);
+  assert.equal(isAllowedReleaseUrl('https://github.com/rdcstout/panda-control/releases.evil/tag/v0.1.4'), false);
+  assert.equal(isAllowedReleaseUrl('https://example.com/rdcstout/panda-control/releases/tag/v0.1.4'), false);
 });

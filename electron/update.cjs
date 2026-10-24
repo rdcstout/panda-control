@@ -33,4 +33,32 @@ function compareVersions(left, right) {
   return comparePrerelease(a.prerelease, b.prerelease);
 }
 
-module.exports = { comparePrerelease, compareVersions, versionParts };
+function expectedStableAsset(platform, arch) {
+  if (platform === 'darwin' && arch === 'arm64') return 'Panda-Control-macOS-arm64.dmg';
+  if (platform === 'win32' && arch === 'x64') return 'Panda-Control-Windows-x64.exe';
+  if (platform === 'linux' && arch === 'x64') return 'Panda-Control-Linux-x86_64.AppImage';
+  return null;
+}
+
+function releaseHasCompatibleAsset(assets, platform, arch) {
+  const expected = expectedStableAsset(platform, arch);
+  return Boolean(expected && Array.isArray(assets) && assets.some(asset => asset?.name === expected));
+}
+
+function isAllowedReleaseUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:'
+      && url.hostname === 'github.com'
+      && url.pathname.startsWith('/rdcstout/panda-control/releases/');
+  } catch (_) { return false; }
+}
+
+module.exports = {
+  comparePrerelease,
+  compareVersions,
+  expectedStableAsset,
+  isAllowedReleaseUrl,
+  releaseHasCompatibleAsset,
+  versionParts,
+};

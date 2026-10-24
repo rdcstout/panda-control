@@ -5,6 +5,7 @@ release/
 *.log
 
 # Local visual-review artifacts
+audit/
 design-qa-comparison*.png
 implementation*.png
 

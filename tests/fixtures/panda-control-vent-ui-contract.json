@@ -1,0 +1,32 @@
+{
+  "source": { "product": "Panda Control Vent", "firmware": "0.1.2", "commit": "532ab59" },
+  "automation": {
+    "eyebrow": "Automatic vent policy",
+    "title": "Vent automation",
+    "description": "Follows the printer’s commanded bed temperature. No filament identification is required.",
+    "advancedLabel": "Advanced",
+    "advancedHelp": "Material rules and cooldown tuning",
+    "sealLabel": "Keep vents closed at",
+    "sealHelp": "Below this target, vents open while printing. At or above it, the chamber stays sealed.",
+    "sealRange": [40, 120],
+    "cooldownEyebrow": "Cooldown behavior",
+    "cooldownTitle": "Idle temperature thresholds",
+    "cooldownHelp": "After a print, vent residual heat until the bed cools below the lower threshold.",
+    "openLabel": "Open at",
+    "openRange": [20, 120],
+    "closeLabel": "Close below",
+    "closeRange": [0, 110],
+    "materialEyebrow": "Material behavior",
+    "materialTitle": "Filament rules",
+    "materialHelp": "Use material reported by an AMS or Klipper printer when available. Unknown material falls back to the bed-temperature threshold above.",
+    "addMaterial": "Add material"
+  },
+  "lighting": {
+    "eyebrow": "Two-zone lighting",
+    "title": "Vent and chamber lights",
+    "description": "LED indices 0–10 control the vent lights. Indices 11–15 control the relocated front LEDs used as chamber lighting.",
+    "linkLabel": "Link both zones",
+    "linkHelp": "Chamber follows vent lighting",
+    "effects": ["Solid", "Color cycle", "Rainbow", "Breathe", "Strobe", "Wave", "Marquee", "Cylon eye"]
+  }
+}

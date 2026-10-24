@@ -34,6 +34,11 @@ install -d \
   "$deb_root/usr/share/icons/hicolor/256x256/apps"
 
 cp -a "$payload_dir/." "$deb_root/opt/panda-control/"
+find "$deb_root/opt/panda-control" -name '._*' -type f -delete
+if find "$deb_root/opt/panda-control" -name '._*' -type f -print -quit | grep -q .; then
+  echo "AppleDouble sidecar files remain in the Debian staging tree." >&2
+  exit 1
+fi
 install -m 0644 "$icon_file" \
   "$deb_root/usr/share/icons/hicolor/256x256/apps/panda-control.png"
 
@@ -45,9 +50,9 @@ Priority: optional
 Architecture: amd64
 Maintainer: Extrusion Therapy
 Depends: libgtk-3-0t64 | libgtk-3-0, libnss3, libgbm1, libasound2t64 | libasound2, libxss1, libxtst6, libsecret-1-0
-Description: Local-network manager for installed BIQU Panda accessories
- Panda Control discovers and manages supported Panda devices without replacing
- their factory setup workflow.
+Description: Unified desktop controls for supported BIQU Panda accessories
+ Panda Control brings Panda Breath, Panda Status, Panda Vent, and Panda Control
+ Vent into one desktop interface.
 EOF
 
 cat > "$deb_root/DEBIAN/postinst" <<'EOF'

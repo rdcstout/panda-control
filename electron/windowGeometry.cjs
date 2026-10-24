@@ -52,8 +52,27 @@ function installLinuxSquareResizeCorrection(window, electronScreen) {
   window.on('closed', () => clearTimeout(resizeTimer));
 }
 
+function installSquareMaximizeCorrection(window, electronScreen) {
+  let correcting = false;
+  window.on('maximize', () => {
+    if (correcting || window.isDestroyed()) return;
+    correcting = true;
+    const display = electronScreen.getDisplayMatching(window.getBounds());
+    const squareSize = Math.max(MIN_CONTENT_SIZE, Math.min(display.workArea.width, display.workArea.height) - 48);
+    window.unmaximize();
+    window.setContentSize(squareSize, squareSize);
+    const bounds = window.getBounds();
+    window.setPosition(
+      Math.round(display.workArea.x + (display.workArea.width - bounds.width) / 2),
+      Math.round(display.workArea.y + (display.workArea.height - bounds.height) / 2),
+    );
+    correcting = false;
+  });
+}
+
 module.exports = {
   MIN_CONTENT_SIZE,
   chooseSquareContentSize,
   installLinuxSquareResizeCorrection,
+  installSquareMaximizeCorrection,
 };

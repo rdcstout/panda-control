@@ -39,7 +39,7 @@ function detectProductFromHtml(html) {
   return null;
 }
 
-function sanitizeControlVentState(state, lighting, settings) {
+function sanitizeControlVentState(state, lighting, settings, filament) {
   if (!state || state.api_version !== 2 || !state.vent || !state.printer) {
     throw new Error('The Panda Control Vent did not return a recognized operational state.');
   }
@@ -73,16 +73,28 @@ function sanitizeControlVentState(state, lighting, settings) {
     mode: state.mode === 'manual' ? 'manual' : 'auto',
     ventTarget: state.vent.target || 'unknown',
     ventRunning: Boolean(state.vent.running),
+    ventCalibrating: Boolean(state.vent.calibrating),
     bedTemperature: state.printer.bed_temperature_c ?? null,
     bedTarget: state.printer.bed_target_c ?? null,
     printerConnected: Boolean(state.printer.connected),
+    printerConnection: state.printer.connection || 'disconnected',
     printerState: state.printer.state || 'unknown',
+    printerSource: state.printer.source || 'unknown',
+    material: state.printer.material || null,
+    chamberLightOn: typeof state.printer.chamber_light_on === 'boolean' ? state.printer.chamber_light_on : null,
+    wifiState: state.wifi?.ssid ? `Connected · ${state.wifi.ssid}` : state.wifi?.state || 'unknown',
+    wifiIp: state.wifi?.ip || null,
+    motorGroups: state.vent.active_groups ?? null,
     policy: {
       automationMode: settings?.automation_mode === 'advanced' ? 'advanced' : 'simple',
       bedSeal: Number(settings?.bed_seal_c ?? state.policy?.bed_seal_c ?? 85),
       bedOpen: Number(settings?.bed_open_c ?? state.policy?.bed_open_c ?? 45),
       bedClose: Number(settings?.bed_close_c ?? state.policy?.bed_close_c ?? 35),
     },
+    filamentRules: (Array.isArray(filament?.rules) ? filament.rules : [])
+      .filter(rule => rule && typeof rule.name === 'string' && rule.name.trim())
+      .slice(0, 20)
+      .map(rule => ({ name: rule.name.trim().slice(0, 11), seal: Boolean(rule.seal) })),
     lighting: {
       linked: Boolean(zones.linked),
       reverse: Array.isArray(lighting?.rev_strip) ? lighting.rev_strip.slice(0, 2).map(Boolean) : [false, false],
@@ -149,14 +161,35 @@ function validateControlVentLighting(input) {
 function validateControlVentSettings(input) {
   const settings = assertObject(input, 'Panda Control Vent automation');
   rejectUnknownKeys(settings, new Set(['automationMode', 'bedSeal', 'bedOpen', 'bedClose']), 'automation field');
-  const bedOpen = assertNumber(settings.bedOpen, 0, 120, 'Open temperature');
-  const bedClose = assertNumber(settings.bedClose, 0, 120, 'Close temperature');
+  const bedOpen = assertNumber(settings.bedOpen, 20, 120, 'Open temperature');
+  const bedClose = assertNumber(settings.bedClose, 0, 110, 'Close temperature');
   if (bedOpen <= bedClose) throw new Error('Open temperature must be higher than close temperature.');
   return {
     automation_mode: settings.automationMode === 'advanced' ? 'advanced' : 'simple',
-    bed_seal_c: assertNumber(settings.bedSeal, 0, 120, 'Seal temperature'),
+    bed_seal_c: assertNumber(settings.bedSeal, 40, 120, 'Seal temperature'),
     bed_open_c: bedOpen,
     bed_close_c: bedClose,
+  };
+}
+
+function validateControlVentFilamentRules(input) {
+  const filament = assertObject(input, 'Panda Control Vent material rules');
+  rejectUnknownKeys(filament, new Set(['rules']), 'material-rule field');
+  if (!Array.isArray(filament.rules)) throw new Error('Material rules must be an array.');
+  if (filament.rules.length > 20) throw new Error('No more than 20 material rules are supported.');
+  return {
+    rules: filament.rules.map((rule, index) => {
+      const entry = assertObject(rule, `Material rule ${index + 1}`);
+      rejectUnknownKeys(entry, new Set(['name', 'seal']), `material rule ${index + 1} field`);
+      const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+      if (!name || name.length > 11) {
+        throw new Error(`Material rule ${index + 1} must have a name between 1 and 11 characters.`);
+      }
+      if (!/^[A-Za-z0-9+._/ -]+$/.test(name)) {
+        throw new Error(`Material rule ${index + 1} may use only letters, numbers, spaces, +, -, period, underscore, or slash.`);
+      }
+      return { name: name.toUpperCase(), seal: Boolean(entry.seal) };
+    }),
   };
 }
 
@@ -348,6 +381,7 @@ module.exports = {
   normalizeTarget,
   sanitizeControlVentState,
   sanitizeState,
+  validateControlVentFilamentRules,
   validateControlVentLighting,
   validateControlVentSettings,
   validateCommand,

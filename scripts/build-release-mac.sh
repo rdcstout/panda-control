@@ -67,4 +67,8 @@ hdiutil verify "$dmg_path"
 spctl --assess --type execute --verbose=4 "$app_path"
 spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg_path"
 
-print "Signed, notarized, stapled, and verified: $dmg_path"
+canonical_dmg="release/Panda-Control-${version}-macOS-arm64.dmg"
+cp -p "$dmg_path" "$canonical_dmg"
+cmp -s "$dmg_path" "$canonical_dmg"
+
+print "Signed, notarized, stapled, and verified: $canonical_dmg"

@@ -9,12 +9,16 @@ const {
   normalizeTarget,
   sanitizeControlVentState,
   sanitizeState,
+  validateControlVentFilamentRules,
   validateControlVentLighting,
   validateControlVentSettings,
   validateCommand,
 } = require('./protocol.cjs');
 
 const execFileAsync = promisify(execFile);
+const CONTROL_VENT_CONFIG_TTL_MS = 15000;
+const controlVentConfigCache = new Map();
+const controlVentReadInFlight = new Map();
 
 function parseNeighborMac(output) {
   const match = String(output || '').match(/\b([0-9a-f]{1,2}(?::|-)){5}[0-9a-f]{1,2}\b/i);
@@ -124,17 +128,38 @@ function httpJson(target, path, { method = 'GET', body } = {}) {
   });
 }
 
-async function collectControlVentState(target) {
-  const [state, lighting, settings] = await Promise.all([
-    httpJson(target, '/api/v2/state'),
-    httpJson(target, '/api/v2/lighting'),
-    httpJson(target, '/api/v2/settings'),
-  ]);
-  return sanitizeControlVentState(state, lighting, settings);
+async function readControlVentConfig(target, force = false) {
+  const cached = controlVentConfigCache.get(target);
+  if (!force && cached && Date.now() - cached.readAt < CONTROL_VENT_CONFIG_TTL_MS) return cached;
+  // The ESP32 web server has a small connection budget. Read configuration
+  // sequentially so the desktop app never starves the embedded web interface.
+  const lighting = await httpJson(target, '/api/v2/lighting');
+  const settings = await httpJson(target, '/api/v2/settings');
+  const filament = await httpJson(target, '/api/v2/filament');
+  const next = { lighting, settings, filament, readAt: Date.now() };
+  controlVentConfigCache.set(target, next);
+  return next;
+}
+
+async function collectControlVentState(target, { forceConfig = false } = {}) {
+  if (!forceConfig && controlVentReadInFlight.has(target)) return controlVentReadInFlight.get(target);
+  if (forceConfig && controlVentReadInFlight.has(target)) {
+    try { await controlVentReadInFlight.get(target); } catch (_) {}
+  }
+  const operation = (async () => {
+    const state = await httpJson(target, '/api/v2/state');
+    const { lighting, settings, filament } = await readControlVentConfig(target, forceConfig);
+    return sanitizeControlVentState(state, lighting, settings, filament);
+  })();
+  controlVentReadInFlight.set(target, operation);
+  try { return await operation; }
+  finally {
+    if (controlVentReadInFlight.get(target) === operation) controlVentReadInFlight.delete(target);
+  }
 }
 
 async function applyControlVentCommands(target, commands) {
-  if (!Array.isArray(commands) || commands.length === 0 || commands.length > 3) {
+  if (!Array.isArray(commands) || commands.length === 0 || commands.length > 4) {
     throw new Error('No valid Panda Control Vent command was supplied.');
   }
   for (const item of commands) {
@@ -150,11 +175,13 @@ async function applyControlVentCommands(target, commands) {
       await httpJson(target, '/api/v2/settings', { method: 'POST', body: validateControlVentSettings(item.settings) });
     } else if (item.lighting) {
       await httpJson(target, '/api/v2/lighting', { method: 'POST', body: validateControlVentLighting(item.lighting) });
+    } else if (item.filament) {
+      await httpJson(target, '/api/v2/filament', { method: 'POST', body: validateControlVentFilamentRules(item.filament) });
     } else {
       throw new Error('Unsupported Panda Control Vent operation.');
     }
   }
-  return collectControlVentState(target);
+  return collectControlVentState(target, { forceConfig: true });
 }
 
 async function probeDevice(input) {
@@ -195,21 +222,40 @@ function candidateAddresses() {
   return [...candidates];
 }
 
-async function scanDevices() {
-  const queue = candidateAddresses();
+async function scanAddressPool(addresses, probe, attempts = [
+  { concurrency: 64, timeout: 900 },
+  { concurrency: 48, timeout: 1500 },
+]) {
+  let pending = [...addresses];
   const found = [];
-  let cursor = 0;
-  const worker = async () => {
-    while (cursor < queue.length) {
-      const target = queue[cursor++];
-      try {
-        const html = await httpPage(target, 700);
-        const identity = detectProductFromHtml(html);
-        if (identity) found.push(discoveredDevice(identity, target, await resolveHardwareId(target)));
-      } catch (_) {}
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(96, queue.length) }, worker));
+  for (const attempt of attempts) {
+    if (!pending.length) break;
+    const queue = pending;
+    const retry = [];
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < queue.length) {
+        const target = queue[cursor++];
+        try {
+          const result = await probe(target, attempt.timeout);
+          if (result) found.push(result);
+          else retry.push(target);
+        } catch (_) { retry.push(target); }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(attempt.concurrency, queue.length) }, worker));
+    pending = retry;
+  }
+  return found;
+}
+
+async function scanDevices() {
+  const found = await scanAddressPool(candidateAddresses(), async (target, timeout) => {
+    const html = await httpPage(target, timeout);
+    const identity = detectProductFromHtml(html);
+    if (!identity) return null;
+    return discoveredDevice(identity, target, await resolveHardwareId(target));
+  });
   return found.sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -301,5 +347,6 @@ module.exports = {
   parseNeighborMac,
   probeDevice,
   resolveHardwareId,
+  scanAddressPool,
   scanDevices,
 };

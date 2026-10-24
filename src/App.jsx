@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowsClockwise, CaretDown, CaretRight, Check, Fan, Fire, Gauge, Moon,
   Info, MusicNotes, Oven, Palette, Pause, Plus, Power, Printer, SlidersHorizontal,
@@ -7,6 +8,19 @@ import {
 import { deviceApi } from './deviceApi';
 import { deviceIdentityMatches, isKnownDevice, reconcileDevices } from './deviceRegistry';
 import { automaticUpdateCheckDue, shouldNotifyForUpdate } from './updatePolicy';
+import { CONTROL_VENT_CONTRACT, controlVentDecision, controlVentPolicySummary } from './controlVentContract';
+import {
+  controlVentCommandSatisfied,
+  deviceSessionKey,
+  draftsEquivalent,
+  ipcErrorMessage,
+  isLatestDeviceRequest,
+  ownsActiveDraft,
+  parseRemovedDeviceIds,
+  parseSavedDevices,
+  shouldReplaceDraftAfterCommand,
+  shouldReplaceDraftAfterSave,
+} from './appState';
 
 const STORAGE_KEY = 'panda-control-devices-v1';
 const REMOVED_STORAGE_KEY = 'panda-control-removed-devices-v1';
@@ -16,15 +30,11 @@ const LAST_UPDATE_CHECK_KEY = 'panda-control-last-update-check-v1';
 const LAST_NOTIFIED_UPDATE_KEY = 'panda-control-last-notified-update-v1';
 
 function readSavedDevices() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch (_) { return []; }
+  return parseSavedDevices(localStorage.getItem(STORAGE_KEY));
 }
 
 function readRemovedDevices() {
-  try { return new Set(JSON.parse(localStorage.getItem(REMOVED_STORAGE_KEY)) || []); } catch (_) { return new Set(); }
-}
-
-function ipcErrorMessage(problem) {
-  return String(problem?.message || problem || 'Unknown error').replace(/^Error invoking remote method '[^']+': Error:\s*/, '');
+  return parseRemovedDeviceIds(localStorage.getItem(REMOVED_STORAGE_KEY));
 }
 
 const rgbaToHex = value => /^#[0-9a-f]{8}$/i.test(value || '') ? value.slice(0, 7) : '#ffffff';
@@ -33,8 +43,11 @@ const rgbToHex = value => `#${String(value || 'FFFFFF').replace('#', '').slice(0
 const hexToRgb = value => String(value || '#FFFFFF').replace('#', '').toUpperCase();
 const rgbArrayToHex = value => `#${(Array.isArray(value) ? value : [255, 255, 255]).map(channel => Math.max(0, Math.min(255, Number(channel) || 0)).toString(16).padStart(2, '0')).join('')}`;
 const hexToRgbArray = value => [1, 3, 5].map(index => parseInt(String(value).slice(index, index + 2), 16));
+const byteToPercent = value => Math.round(Number(value || 0) / 2.55);
+const percentToByte = value => Math.round(Number(value || 0) * 2.55);
+const displayTitle = value => String(value || '—').replace(/[_-]+/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
 const EFFECT_NAMES = ['Static', 'Breathing', 'Strobing', 'Wave', 'Marquee', 'Color Cycle', 'Rainbow'];
-const CONTROL_EFFECT_NAMES = ['Solid', 'Color Cycle', 'Rainbow', 'Breathe', 'Strobe', 'Wave', 'Marquee', 'Cylon Eye'];
+const CONTROL_EFFECT_NAMES = CONTROL_VENT_CONTRACT.lighting.effects;
 const VENT_STATE_NAMES = ['Idle', 'Preparing', 'Printing', 'Paused', 'Finished', 'Error'];
 const DESIGN_WIDTH = 1440;
 const DESIGN_HEIGHT = 1440;
@@ -48,7 +61,9 @@ function useInterfaceScale(canvasRef) {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const scale = Math.min(1, window.innerWidth / DESIGN_WIDTH, window.innerHeight / DESIGN_HEIGHT);
-        canvas.style.setProperty('--interface-scale', Math.max(0.3, scale).toFixed(4));
+        const fittedScale = Math.max(0.3, scale).toFixed(4);
+        canvas.style.setProperty('--interface-scale', fittedScale);
+        document.documentElement.style.setProperty('--interface-scale', fittedScale);
       });
     };
     const resizeObserver = new ResizeObserver(fit);
@@ -92,7 +107,12 @@ function draftFromState(state) {
     };
   }
   if (state.product === 'control-vent') {
-    return { product: 'control-vent', policy: structuredClone(state.policy), lighting: structuredClone(state.lighting) };
+    return {
+      product: 'control-vent',
+      policy: structuredClone(state.policy),
+      filamentRules: structuredClone(state.filamentRules),
+      lighting: structuredClone(state.lighting),
+    };
   }
   return {
     product: 'breath',
@@ -136,7 +156,7 @@ function SettingRow({ icon: Icon, title, description, children }) {
   );
 }
 
-function SegmentedModes({ value, items, onChange }) {
+function SegmentedModes({ value, items, onChange, disabled = false }) {
   return (
     <div className="mode-group" role="radiogroup" aria-label="Work mode">
       {items.map(item => {
@@ -144,7 +164,7 @@ function SegmentedModes({ value, items, onChange }) {
         const selected = value === item.value;
         return (
           <button key={item.value} type="button" className={`mode-choice ${selected ? 'selected' : ''}`}
-            role="radio" aria-checked={selected} onClick={() => onChange(item.value)}>
+            role="radio" aria-checked={selected} disabled={disabled} onClick={() => onChange(item.value)}>
             <Icon size={34} weight={selected ? 'duotone' : 'regular'} aria-hidden="true" />
             <span>{item.label}</span>
           </button>
@@ -154,14 +174,14 @@ function SegmentedModes({ value, items, onChange }) {
   );
 }
 
-function StatusPanel({ state, draft, setDraft, onReset }) {
+function StatusPanel({ state, draft, setDraft, onReset, online }) {
   const modes = [{ value: 0, label: 'Music', icon: MusicNotes }, { value: 1, label: 'H2D', icon: Sparkle }];
   const colorLabels = ['Idle', 'Printing', 'Error'];
   const changeMode = mode => setDraft(current => ({ ...current, mode, brightness: state.modes[mode]?.brightness ?? current.brightness }));
   return (
     <>
       <section className="device-heading status-heading">
-        <div><div className="title-line"><h1>Panda Status</h1><span className="online-label"><i />Online</span></div><p>Printer-aware status lighting</p></div>
+        <div><div className="title-line"><h1>Panda Status</h1><span className={`online-label ${online ? '' : 'offline'}`}><i />{online ? 'Online' : 'Offline'}</span></div><p>Printer-aware status lighting</p></div>
         <div className="summary-surface compact-summary">
           <div><span>Light Effect</span><strong>{draft.mode === 0 ? 'Music' : 'H2D'}</strong></div>
           <div className="summary-divider" />
@@ -182,7 +202,7 @@ function StatusPanel({ state, draft, setDraft, onReset }) {
           </SettingRow>
           {draft.mode === 1 && colorLabels.map((label, index) => (
             <SettingRow key={label} icon={index === 2 ? WarningCircle : index === 1 ? Gauge : Moon}
-              title={`${label} color`} description={`Lighting shown while the printer is ${label.toLowerCase()}.`}>
+              title={`${label} color`} description={label === 'Error' ? 'Lighting shown while the printer is in an error state.' : `Lighting shown while the printer is ${label.toLowerCase()}.`}>
               <label className="color-control"><input type="color" value={draft.colors[index]}
                 onChange={event => setDraft(current => ({ ...current, colors: current.colors.map((color, colorIndex) => colorIndex === index ? event.target.value : color) }))} />
                 <span>{draft.colors[index].toUpperCase()}</span></label>
@@ -194,7 +214,7 @@ function StatusPanel({ state, draft, setDraft, onReset }) {
   );
 }
 
-function BreathPanel({ state, draft, setDraft, onDryingToggle, busy }) {
+function BreathPanel({ state, draft, setDraft, onDryingToggle, busy, online }) {
   const modes = [
     { value: 1, label: 'Auto', icon: Waves },
     { value: 2, label: 'Power On', icon: Oven },
@@ -204,7 +224,7 @@ function BreathPanel({ state, draft, setDraft, onDryingToggle, busy }) {
   return (
     <>
       <section className="device-heading">
-        <div><div className="title-line"><h1>Panda Breath</h1><span className="online-label"><i />Online</span></div><p>Panda Environmental Controller</p></div>
+        <div><div className="title-line"><h1>Panda Breath</h1><span className={`online-label ${online ? '' : 'offline'}`}><i />{online ? 'Online' : 'Offline'}</span></div><p>Panda Environmental Controller</p></div>
         <div className="summary-surface">
           <div><span>Current Chamber</span><strong>{state.chamberTemp ?? '—'}<small>°C</small></strong></div>
           <div className="summary-divider" />
@@ -239,8 +259,8 @@ function BreathPanel({ state, draft, setDraft, onDryingToggle, busy }) {
   );
 }
 
-function MiniSwitch({ checked, onChange, label }) {
-  return <label className="mini-switch"><input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} aria-label={label} /><i aria-hidden="true" /></label>;
+function MiniSwitch({ checked, onChange, label, disabled = false }) {
+  return <label className={`mini-switch ${disabled ? 'disabled' : ''}`}><input type="checkbox" checked={checked} disabled={disabled} onChange={event => onChange(event.target.checked)} aria-label={label} /><i aria-hidden="true" /></label>;
 }
 
 function EffectPicker({ value, onChange, allowed = EFFECT_NAMES }) {
@@ -257,7 +277,7 @@ function EffectControls({ effect, onChange, fixedColor }) {
   </div>;
 }
 
-function VentPanel({ draft, setDraft }) {
+function VentPanel({ draft, setDraft, online }) {
   const [advancedState, setAdvancedState] = useState(0);
   const [warningState, setWarningState] = useState('safe');
   const modes = [
@@ -282,7 +302,7 @@ function VentPanel({ draft, setDraft }) {
 
   return <>
     <section className="device-heading">
-      <div><div className="title-line"><h1>Panda Vent</h1><span className="online-label"><i />Online</span></div><p>Printer-aware ventilation lighting</p></div>
+      <div><div className="title-line"><h1>Panda Vent</h1><span className={`online-label ${online ? '' : 'offline'}`}><i />{online ? 'Online' : 'Offline'}</span></div><p>Printer-aware ventilation lighting</p></div>
       <div className="summary-surface compact-summary"><div><span>Light Mode</span><strong>{modeNames[draft.mode]}</strong></div><div className="summary-divider" /><label className="switch-block"><span>Lighting Enabled</span><input type="checkbox" checked={draft.enabled} onChange={event => setDraft(current => ({ ...current, enabled: event.target.checked }))} /><i aria-hidden="true" /></label></div>
     </section>
     <section className="section-block"><span className="eyebrow">Light Mode</span><SegmentedModes value={draft.mode} items={modes} onChange={mode => setDraft(current => ({ ...current, mode }))} /><p className="mode-help">{draft.mode === 0 ? 'Use one lighting effect continuously.' : draft.mode === 1 ? 'Give each printer state its own effect, brightness, speed, and color.' : 'Show a clear safe or hot condition using dedicated warning effects.'}</p></section>
@@ -303,51 +323,105 @@ function ControlVentColor({ label, value, onChange, option }) {
   return <SettingRow icon={Palette} title={label}><div className="control-vent-color"><label className="color-control"><input type="color" value={rgbArrayToHex(value)} onChange={event => onChange(hexToRgbArray(event.target.value))} /><span>{rgbArrayToHex(value).toUpperCase()}</span></label>{option}</div></SettingRow>;
 }
 
-function ControlVentLighting({ draft, setDraft }) {
+function ControlVentLighting({ state, draft, setDraft }) {
   const [zoneName, setZoneName] = useState('vent');
   const zone = draft.lighting[zoneName];
+  const zoneDisabled = zoneName === 'chamber' && draft.lighting.linked;
   const updateZone = values => setDraft(current => ({ ...current, lighting: { ...current.lighting, [zoneName]: { ...current.lighting[zoneName], ...values } } }));
   const printerMode = zone.mode === 1;
   const colors = printerMode
-    ? [['Idle', 'idle'], ['Preparing', 'prep'], ['Printing', 'printing'], ['Paused', 'paused'], ['Completed', 'complete']]
-    : [['Open', 'open'], ['Closed', 'closed']];
+    ? [['Idle color', 'idle'], ['Preparing', 'prep'], ['Printing color', 'printing'], ['Paused', 'paused'], ['Completed', 'complete']]
+    : [['Open color', 'open'], ['Closed color', 'closed']];
   return <section className="section-block control-vent-lighting">
-    <div className="section-title-row"><span className="eyebrow">Lighting</span><label className="inline-check"><input type="checkbox" checked={draft.lighting.linked} onChange={event => { const linked = event.target.checked; if (linked) setZoneName('vent'); setDraft(current => ({ ...current, lighting: { ...current.lighting, linked } })); }} />Link chamber to vent lights</label></div>
-    <div className="zone-tabs"><button type="button" className={zoneName === 'vent' ? 'selected' : ''} onClick={() => setZoneName('vent')}>Vent Lights</button><button type="button" disabled={draft.lighting.linked} className={zoneName === 'chamber' ? 'selected' : ''} onClick={() => setZoneName('chamber')}>Chamber Lights</button></div>
-    <div className="settings-panel">
-      <SettingRow icon={Power} title={`${zoneName === 'vent' ? 'Vent' : 'Chamber'} Lights`} description="Turn this lighting zone on or off."><MiniSwitch label={`${zoneName} lights`} checked={zone.enabled} onChange={enabled => updateZone({ enabled })} /></SettingRow>
-      {zoneName === 'chamber' && <SettingRow icon={Printer} title="Follow Factory Chamber Light" description="Turns these chamber lights off when the printer's chamber light is off."><MiniSwitch label="Follow factory chamber light" checked={zone.followPrinterLight} onChange={followPrinterLight => updateZone({ followPrinterLight })} /></SettingRow>}
-      <SettingRow icon={Sun} title="Brightness" description="Maximum brightness for this lighting zone."><div className="slider-control"><input type="range" min="0" max="255" value={zone.brightness} onChange={event => updateZone({ brightness: Number(event.target.value) })} /><output>{Math.round(zone.brightness / 2.55)}%</output></div></SettingRow>
-      <SettingRow icon={SlidersHorizontal} title="Color Follows" description="Choose whether colors represent vent position or printer status."><div className="source-selector"><button type="button" className={!printerMode ? 'selected' : ''} onClick={() => updateZone({ mode: 0 })}>Vent State</button><button type="button" className={printerMode ? 'selected' : ''} onClick={() => updateZone({ mode: 1 })}>Printer Status</button></div></SettingRow>
-      <SettingRow icon={Sparkle} title="Effect" description="Lighting animation for this zone."><select className="select-control" value={zone.effect} onChange={event => updateZone({ effect: Number(event.target.value) })}>{CONTROL_EFFECT_NAMES.map((name, index) => <option value={index} key={name}>{name}</option>)}</select></SettingRow>
-      {zone.effect !== 0 && <SettingRow icon={Timer} title="Effect Speed" description="Adjusts the animation speed."><div className="slider-control"><input type="range" min="0" max="255" value={zone.speed} onChange={event => updateZone({ speed: Number(event.target.value) })} /><output>{Math.round(zone.speed / 2.55)}%</output></div></SettingRow>}
-      <details className="control-color-details"><summary>Colors and behavior</summary><div>
-        {colors.map(([label, key]) => <ControlVentColor key={key} label={`${label} Color`} value={zone[key]} onChange={value => updateZone({ [key]: value })} option={zoneName === 'chamber' && key === 'idle' ? <label className="inline-check"><input type="checkbox" checked={zone.dimIdle} onChange={event => updateZone({ dimIdle: event.target.checked })} />Dim to 20% while idle</label> : null} />)}
-        <ControlVentColor label="Error Color" value={zone.error} onChange={error => updateZone({ error })} option={<label className="inline-check"><input type="checkbox" checked={zone.useError} onChange={event => updateZone({ useError: event.target.checked })} />Flash on error</label>} />
-        <SettingRow icon={ArrowsClockwise} title="Animation Direction" description="Reverse animated effects independently on each side."><div className="direction-checks"><label className="inline-check"><input type="checkbox" checked={draft.lighting.reverse[0]} onChange={event => setDraft(current => ({ ...current, lighting: { ...current.lighting, reverse: [event.target.checked, current.lighting.reverse[1]] } }))} />Reverse left</label><label className="inline-check"><input type="checkbox" checked={draft.lighting.reverse[1]} onChange={event => setDraft(current => ({ ...current, lighting: { ...current.lighting, reverse: [current.lighting.reverse[0], event.target.checked] } }))} />Reverse right</label></div></SettingRow>
-      </div></details>
-    </div>
+    <div className="section-title-row"><span className="eyebrow">{CONTROL_VENT_CONTRACT.lighting.eyebrow}</span><div className="linked-zone-control"><div><strong>{CONTROL_VENT_CONTRACT.lighting.linkLabel}</strong><span>{CONTROL_VENT_CONTRACT.lighting.linkHelp}</span></div><MiniSwitch label={CONTROL_VENT_CONTRACT.lighting.linkLabel} checked={draft.lighting.linked} onChange={linked => setDraft(current => ({ ...current, lighting: { ...current.lighting, linked } }))} /></div></div>
+    <div className="section-context"><strong>{CONTROL_VENT_CONTRACT.lighting.title}</strong><span>{CONTROL_VENT_CONTRACT.lighting.description}</span></div>
+    <div className="zone-tabs" role="tablist" aria-label="Lighting zone"><button type="button" role="tab" aria-selected={zoneName === 'vent'} className={zoneName === 'vent' ? 'selected' : ''} onClick={() => setZoneName('vent')}>Vent Lights</button><button type="button" role="tab" aria-selected={zoneName === 'chamber'} className={zoneName === 'chamber' ? 'selected' : ''} onClick={() => setZoneName('chamber')}>Chamber Lights</button></div>
+    <p className="zone-description">{zoneName === 'vent' ? 'Main vent lighting on both left and right assemblies.' : 'Relocated front LEDs, independently addressable on both sides.'}</p>
+    <fieldset className="linked-zone-fieldset" disabled={zoneDisabled}>
+      {zoneDisabled && <p className="linked-zone-notice">{CONTROL_VENT_CONTRACT.lighting.linkHelp}</p>}
+      <div className="settings-panel">
+        <SettingRow icon={Power} title="Lighting enabled" description="Turn this zone on or off"><MiniSwitch disabled={zoneDisabled} label={`${zoneName} lights`} checked={zone.enabled} onChange={enabled => updateZone({ enabled })} /></SettingRow>
+        {zoneName === 'chamber' && <SettingRow icon={Printer} title="Follow printer chamber light" description={state.chamberLightOn === true ? 'Printer light on' : state.chamberLightOn === false ? 'Printer light off' : 'Waiting for printer light status'}><MiniSwitch disabled={zoneDisabled} label="Follow printer chamber light" checked={zone.followPrinterLight} onChange={followPrinterLight => updateZone({ followPrinterLight })} /></SettingRow>}
+        <SettingRow icon={Sun} title="Brightness"><div className="slider-control"><input aria-label={`${zoneName} light brightness`} type="range" min="0" max="100" value={byteToPercent(zone.brightness)} onChange={event => updateZone({ brightness: percentToByte(event.target.value) })} /><output>{byteToPercent(zone.brightness)}%</output></div></SettingRow>
+        <SettingRow icon={SlidersHorizontal} title="Color follows"><div className="source-selector"><button type="button" aria-pressed={!printerMode} className={!printerMode ? 'selected' : ''} onClick={() => updateZone({ mode: 0 })}>Vent state</button><button type="button" aria-pressed={printerMode} className={printerMode ? 'selected' : ''} onClick={() => updateZone({ mode: 1 })}>Printer status</button></div></SettingRow>
+        <SettingRow icon={Sparkle} title="Effect"><select className="select-control" value={zone.effect} onChange={event => updateZone({ effect: Number(event.target.value) })}>{CONTROL_EFFECT_NAMES.map((name, index) => <option value={index} key={name}>{name}</option>)}</select></SettingRow>
+        <SettingRow icon={Timer} title="Effect speed"><div className="slider-control"><input aria-label={`${zoneName} light effect speed`} type="range" min="0" max="100" value={byteToPercent(zone.speed)} onChange={event => updateZone({ speed: percentToByte(event.target.value) })} /><output>{byteToPercent(zone.speed)}%</output></div></SettingRow>
+        <details className="control-color-details"><summary>Colors and behavior</summary><div>
+          {colors.map(([label, key]) => <ControlVentColor key={key} label={label} value={zone[key]} onChange={value => updateZone({ [key]: value })} option={zoneName === 'chamber' && key === 'idle' ? <label className="inline-check"><input type="checkbox" checked={zone.dimIdle} onChange={event => updateZone({ dimIdle: event.target.checked })} />Dim while idle</label> : null} />)}
+          {!printerMode && <SettingRow icon={Thermometer} title="Temperature blend"><div className="temperature-blend-control"><label className="inline-check"><input type="checkbox" checked={zone.useTemp} onChange={event => updateZone({ useTemp: event.target.checked })} />Use</label><NumberStepper value={zone.tempMin} min={0} max={120} suffix="°C" onChange={tempMin => updateZone({ tempMin })} /><NumberStepper value={zone.tempMax} min={0} max={120} suffix="°C" onChange={tempMax => updateZone({ tempMax })} /></div></SettingRow>}
+          <ControlVentColor label="Error color" value={zone.error} onChange={error => updateZone({ error })} option={<label className="inline-check"><input type="checkbox" checked={zone.useError} onChange={event => updateZone({ useError: event.target.checked })} />Flash</label>} />
+        </div></details>
+      </div>
+    </fieldset>
+    <div className="settings-panel lighting-direction-panel"><SettingRow icon={ArrowsClockwise} title="Reverse left animation direction" description="Keeps motion effects visually aligned"><MiniSwitch label="Reverse left animation direction" checked={draft.lighting.reverse[0]} onChange={value => setDraft(current => ({ ...current, lighting: { ...current.lighting, reverse: [value, current.lighting.reverse[1]] } }))} /></SettingRow><SettingRow icon={ArrowsClockwise} title="Reverse right animation direction" description="Keeps motion effects visually aligned"><MiniSwitch label="Reverse right animation direction" checked={draft.lighting.reverse[1]} onChange={value => setDraft(current => ({ ...current, lighting: { ...current.lighting, reverse: [current.lighting.reverse[0], value] } }))} /></SettingRow></div>
   </section>;
 }
 
-function ControlVentPanel({ state, draft, setDraft, onCommand, busy }) {
-  const targetLabel = state.ventTarget === 'open' ? 'Open' : state.ventTarget === 'closed' ? 'Closed' : 'Unknown';
+function ControlVentPanel({ state, draft, setDraft, onCommand, busy, online }) {
+  const targetLabel = state.ventTarget === 'open' ? 'Vents open' : state.ventTarget === 'closed' ? 'Chamber sealed' : 'Vent controller';
+  const motionLabel = state.ventCalibrating ? 'Calibrating' : state.ventRunning ? 'Moving now' : 'Vents stationary';
+  const advanced = draft.policy.automationMode === 'advanced';
+  const setAutomationMode = enabled => setDraft(current => ({
+    ...current,
+    policy: { ...current.policy, automationMode: enabled ? 'advanced' : 'simple' },
+  }));
+  const updateRule = (index, values) => setDraft(current => ({
+    ...current,
+    filamentRules: current.filamentRules.map((rule, ruleIndex) => ruleIndex === index ? { ...rule, ...values } : rule),
+  }));
+  const removeRule = index => setDraft(current => ({
+    ...current,
+    filamentRules: current.filamentRules.filter((_, ruleIndex) => ruleIndex !== index),
+  }));
+  const addRule = () => setDraft(current => current.filamentRules.length >= 20 ? current : ({
+    ...current,
+    filamentRules: [...current.filamentRules, { name: '', seal: true }],
+  }));
+  const decision = controlVentDecision(state, draft.policy, draft.filamentRules);
+  const policySummary = controlVentPolicySummary(draft.policy);
+  const controlMode = state.mode === 'auto' ? 'auto' : state.ventTarget === 'open' ? 'open' : 'closed';
+  const controlModes = [
+    { value: 'open', label: 'Open vents', icon: Fan },
+    { value: 'closed', label: 'Close vents', icon: Power },
+    { value: 'auto', label: 'Use Auto', icon: Sparkle },
+  ];
+  const changeControlMode = value => onCommand(value === 'auto' ? { name: 'auto' } : { name: 'manual', target: value });
   return <>
     <section className="device-heading">
-      <div><div className="title-line"><h1>Panda Control Vent</h1><span className="online-label"><i />Online</span></div><p>Printer-aware chamber ventilation</p></div>
-      <div className="summary-surface compact-summary"><div><span>Vent Position</span><strong>{state.ventRunning ? 'Moving' : targetLabel}</strong></div><div className="summary-divider" /><div><span>Bed Temperature</span><strong>{state.bedTemperature ?? '—'}<small>°C</small></strong></div></div>
+      <div><div className="title-line"><h1>Panda Control Vent</h1><span className={`online-label ${online ? '' : 'offline'}`}><i />{online ? 'Online' : 'Offline'}</span></div><p>Printer-aware chamber ventilation</p></div>
+      <div className="summary-surface compact-summary"><div><span>{displayTitle(state.mode)} mode</span><strong>{targetLabel}</strong><span className="summary-detail">{motionLabel}</span></div><div className="summary-divider" /><div><span>Bed temperature</span><strong>{state.bedTemperature ?? '—'}<small>°C</small></strong></div></div>
     </section>
-    <section className="section-block"><span className="eyebrow">Vent Control</span><div className="settings-panel">
-      <SettingRow icon={Fan} title="Operating Mode" description={state.mode === 'auto' ? 'Following the active printer and automatic vent policy.' : 'Manual vent control is active.'}>
-        <div className="source-selector"><button type="button" className={state.mode === 'manual' && state.ventTarget === 'open' ? 'selected' : ''} disabled={busy} onClick={() => onCommand({ name: 'manual', target: 'open' })}>Open</button><button type="button" className={state.mode === 'manual' && state.ventTarget === 'closed' ? 'selected' : ''} disabled={busy} onClick={() => onCommand({ name: 'manual', target: 'closed' })}>Close</button><button type="button" className={state.mode === 'auto' ? 'selected' : ''} disabled={busy} onClick={() => onCommand({ name: 'auto' })}>Auto</button></div>
-      </SettingRow>
-      <SettingRow icon={Printer} title="Printer Connection" description={`Bambu printer is ${state.printerState || 'unknown'}.`}><span className={`inline-status ${state.printerConnected ? 'ok' : ''}`}><i />{state.printerConnected ? 'Connected' : 'Disconnected'}</span></SettingRow>
+    <section className="section-block control-vent-modes"><span className="eyebrow">Vent Control</span>
+      <SegmentedModes value={controlMode} items={controlModes} onChange={changeControlMode} disabled={busy} />
+      <p className="mode-help">{state.mode === 'auto' ? 'Following the active printer and automatic policy.' : 'Manual vent control is active.'}</p>
+      {state.mode === 'auto' && <div className="policy-summary vent-policy-summary"><span>{policySummary[0]}</span><span>{policySummary[1]}</span></div>}
+      <div className="vent-telemetry" aria-label="Live printer status">
+        <div><span>Connection</span><strong className={`inline-status ${state.printerConnected ? 'ok' : ''}`}><i />{state.printerConnected ? 'Connected' : displayTitle(state.printerConnection)}</strong></div>
+        <div><span>Source</span><strong>{displayTitle(state.printerSource)}</strong></div>
+        <div><span>Print state</span><strong>{displayTitle(state.printerState)}</strong></div>
+        <div><span>Material</span><strong>{state.material || '—'}</strong></div>
+      </div>
+    </section>
+    <section className="section-block control-vent-automation"><div className="section-title-row"><span className="eyebrow">{CONTROL_VENT_CONTRACT.automation.eyebrow}</span><div className="advanced-policy-toggle"><div><strong>{CONTROL_VENT_CONTRACT.automation.advancedLabel}</strong><span>{CONTROL_VENT_CONTRACT.automation.advancedHelp}</span></div><MiniSwitch label="Advanced automation" checked={advanced} onChange={setAutomationMode} /></div></div><div className="section-context"><strong>{CONTROL_VENT_CONTRACT.automation.title}</strong><span>{CONTROL_VENT_CONTRACT.automation.description}</span></div><div className="settings-panel">
+      <SettingRow icon={ThermometerHot} title={CONTROL_VENT_CONTRACT.automation.sealLabel} description={CONTROL_VENT_CONTRACT.automation.sealHelp}><NumberStepper value={draft.policy.bedSeal} min={CONTROL_VENT_CONTRACT.automation.sealRange[0]} max={CONTROL_VENT_CONTRACT.automation.sealRange[1]} suffix="°C" onChange={bedSeal => setDraft(current => ({ ...current, policy: { ...current.policy, bedSeal } }))} /></SettingRow>
+      <div className="automation-decision"><strong>{decision[0]}</strong><span>{decision[1]}</span></div>
     </div></section>
-    <section className="section-block"><span className="eyebrow">Automatic Policy</span><div className="settings-panel">
-      <SettingRow icon={ThermometerHot} title="Keep Chamber Sealed" description="Bed targets at or above this temperature keep the vents closed."><NumberStepper value={draft.policy.bedSeal} min={0} max={120} suffix="°C" onChange={bedSeal => setDraft(current => ({ ...current, policy: { ...current.policy, bedSeal } }))} /></SettingRow>
-      <SettingRow icon={Thermometer} title="Close After Cooldown" description="Closes the vents after a print when the bed reaches this temperature."><NumberStepper value={draft.policy.bedClose} min={0} max={120} suffix="°C" onChange={bedClose => setDraft(current => ({ ...current, policy: { ...current.policy, bedClose } }))} /></SettingRow>
-    </div></section>
-    <ControlVentLighting draft={draft} setDraft={setDraft} />
+    {advanced && <section className="section-block cooldown-section"><span className="eyebrow">{CONTROL_VENT_CONTRACT.automation.cooldownEyebrow}</span><div className="section-context"><strong>{CONTROL_VENT_CONTRACT.automation.cooldownTitle}</strong><span>{CONTROL_VENT_CONTRACT.automation.cooldownHelp}</span></div><div className="settings-panel">
+      <SettingRow icon={ThermometerHot} title={CONTROL_VENT_CONTRACT.automation.openLabel}><NumberStepper value={draft.policy.bedOpen} min={CONTROL_VENT_CONTRACT.automation.openRange[0]} max={CONTROL_VENT_CONTRACT.automation.openRange[1]} suffix="°C" onChange={bedOpen => setDraft(current => ({ ...current, policy: { ...current.policy, bedOpen } }))} /></SettingRow>
+      <SettingRow icon={Thermometer} title={CONTROL_VENT_CONTRACT.automation.closeLabel}><NumberStepper value={draft.policy.bedClose} min={CONTROL_VENT_CONTRACT.automation.closeRange[0]} max={CONTROL_VENT_CONTRACT.automation.closeRange[1]} suffix="°C" onChange={bedClose => setDraft(current => ({ ...current, policy: { ...current.policy, bedClose } }))} /></SettingRow>
+    </div></section>}
+    {advanced && <section className="section-block material-rules-section"><div className="section-title-row"><span className="eyebrow">{CONTROL_VENT_CONTRACT.automation.materialEyebrow}</span><button type="button" className="quiet-link add-material-rule" disabled={draft.filamentRules.length >= 20} onClick={addRule}><Plus size={15} />{CONTROL_VENT_CONTRACT.automation.addMaterial}</button></div>
+      <div className="section-context"><strong>{CONTROL_VENT_CONTRACT.automation.materialTitle}</strong><span>{CONTROL_VENT_CONTRACT.automation.materialHelp}</span></div>
+      <div className="material-rules-panel">
+        {draft.filamentRules.map((rule, index) => <div className="material-rule" key={index}>
+          <label><span>Material</span><input value={rule.name} maxLength={11} placeholder="Material" aria-label={`Material rule ${index + 1} name`} onChange={event => updateRule(index, { name: event.target.value.toUpperCase() })} /></label>
+          <label className="inline-check material-rule-seal"><input type="checkbox" checked={rule.seal} onChange={event => updateRule(index, { seal: event.target.checked })} />Seal</label>
+          <button type="button" className="material-rule-remove" aria-label={`Remove ${rule.name || `material rule ${index + 1}`}`} onClick={() => removeRule(index)}><Trash size={17} /><span>Remove</span></button>
+        </div>)}
+        {!draft.filamentRules.length && <div className="material-rules-empty"><strong>No material rules</strong><span>Unknown materials will use the bed-temperature threshold.</span></div>}
+      </div>
+    </section>}
+    <ControlVentLighting state={state} draft={draft} setDraft={setDraft} />
   </>;
 }
 
@@ -355,7 +429,44 @@ function UnsupportedPanel({ device, onRemove }) {
   return <section className="unsupported-panel"><WarningCircle size={44} weight="duotone" /><h1>{device.name}</h1><p>Panda Control found this device, but it does not have a validated native control profile yet.</p><div className="unavailable-actions"><AppButton icon={SlidersHorizontal} onClick={() => deviceApi.openDevicePage(device.ip)}>Open Original Interface</AppButton><AppButton icon={Trash} className="remove-device-button" onClick={onRemove}>Remove Device</AppButton></div></section>;
 }
 
+function useModalBehavior(dialogRef, onClose) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const appShell = document.querySelector('.app-shell');
+    const priorFocus = document.activeElement;
+    if (!dialog) return undefined;
+    if (appShell) appShell.inert = true;
+    const focusableSelector = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+    const focusable = () => [...dialog.querySelectorAll(focusableSelector)].filter(element => !element.hidden);
+    (focusable()[0] || dialog).focus();
+    const handleKeyDown = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = focusable();
+      if (!items.length) { event.preventDefault(); dialog.focus(); return; }
+      const first = items[0];
+      const last = items.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      if (appShell) appShell.inert = false;
+      if (priorFocus instanceof HTMLElement && priorFocus.isConnected) priorFocus.focus();
+    };
+  }, [dialogRef]);
+}
+
 function AddDeviceDialog({ onClose, onAdd, onAddDiscovered, knownDevices }) {
+  const dialogRef = useRef(null);
+  useModalBehavior(dialogRef, onClose);
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -367,24 +478,25 @@ function AddDeviceDialog({ onClose, onAdd, onAddDiscovered, knownDevices }) {
   const search = useCallback(async () => {
     setSearching(true); setSearchError('');
     try { setResults(await deviceApi.scanDevices()); }
-    catch (problem) { setSearchError(problem.message); }
+    catch (problem) { setSearchError(ipcErrorMessage(problem)); }
     finally { setSearching(false); }
   }, []);
   useEffect(() => { search(); }, [search]);
-  const submit = async event => { event.preventDefault(); setBusy(true); setError(''); try { await onAdd(value); onClose(); } catch (problem) { setError(problem.message); } finally { setBusy(false); } };
+  const submit = async event => { event.preventDefault(); setBusy(true); setError(''); try { await onAdd(value); onClose(); } catch (problem) { setError(ipcErrorMessage(problem)); } finally { setBusy(false); } };
   const addFound = async device => {
     setAddingId(device.id);
     try { await onAddDiscovered(device); }
+    catch (problem) { setSearchError(ipcErrorMessage(problem)); }
     finally { setAddingId(null); }
   };
   const openPrivacySettings = async () => {
     setSettingsError('');
     try { await deviceApi.openPrivacySettings(); }
-    catch (_) { setSettingsError('Open System Settings → Privacy & Security → Local Network manually.'); }
+    catch (problem) { setSettingsError(`${ipcErrorMessage(problem)} Open System Settings → Privacy & Security → Local Network manually.`); }
   };
-  return (
+  return createPortal(
     <div className="modal-backdrop" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}>
-      <div className="modal add-device-modal" role="dialog" aria-modal="true" aria-labelledby="add-device-title">
+      <div ref={dialogRef} tabIndex="-1" className="modal add-device-modal" role="dialog" aria-modal="true" aria-labelledby="add-device-title">
         <div className="modal-heading"><div><h2 id="add-device-title">Add a Panda device</h2><p>Devices that are already set up will appear here automatically.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={20} /></button></div>
         <div className="discovery-heading"><div><strong>Devices on This Network</strong><span>{searching ? 'Searching local addresses…' : `${results.length} device${results.length === 1 ? '' : 's'} found`}</span></div><button type="button" className="search-again-button" onClick={search} disabled={searching}>{searching ? <Spinner size={17} /> : <ArrowsClockwise size={17} />}Search Again</button></div>
         <div className="discovery-results" aria-live="polite">
@@ -395,19 +507,24 @@ function AddDeviceDialog({ onClose, onAdd, onAddDiscovered, knownDevices }) {
           })}
         </div>
         <div className="manual-divider"><span>Or add by address</span></div>
-        <form className="manual-add-form" onSubmit={submit}><label className="field-label" htmlFor="device-address">IP address or .local hostname</label><div className="manual-address-row"><input id="device-address" value={value} onChange={event => setValue(event.target.value)} placeholder="192.168.5.94" /><button type="submit" className="primary-button" disabled={busy || !value.trim()}>{busy && <Spinner />}Add Device</button></div>{error && <p className="form-error"><WarningCircle size={17} />{error}</p>}</form>
+        <form className="manual-add-form" onSubmit={submit}><label className="field-label" htmlFor="device-address">IP address or .local hostname</label><div className="manual-address-row"><input id="device-address" value={value} onChange={event => setValue(event.target.value)} placeholder="192.168.1.50" /><button type="submit" className="primary-button" disabled={busy || !value.trim()}>{busy && <Spinner />}Add Device</button></div>{error && <p className="form-error"><WarningCircle size={17} />{error}</p>}</form>
         {deviceApi.platform === 'darwin' && <aside className="network-permission-help" aria-labelledby="network-permission-title"><div><strong id="network-permission-title">Can’t find your devices?</strong><p>Open Privacy &amp; Security, select Local Network, then turn Panda Control off and back on before searching again.</p>{settingsError && <p className="form-error"><WarningCircle size={17} />{settingsError}</p>}</div><button type="button" className="search-again-button" onClick={openPrivacySettings}>Open Privacy &amp; Security</button></aside>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
 function ConfirmDialog({ title, body, confirmLabel, onCancel, onConfirm }) {
-  return <div className="modal-backdrop" role="presentation"><div className="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title"><h2 id="confirm-title">{title}</h2><p>{body}</p><div className="modal-actions"><button className="secondary-button" onClick={onCancel}>Cancel</button><button className="primary-button" onClick={onConfirm}>{confirmLabel}</button></div></div></div>;
+  const dialogRef = useRef(null);
+  useModalBehavior(dialogRef, onCancel);
+  return createPortal(<div className="modal-backdrop" role="presentation" onMouseDown={event => event.target === event.currentTarget && onCancel()}><div ref={dialogRef} tabIndex="-1" className="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title"><h2 id="confirm-title">{title}</h2><p>{body}</p><div className="modal-actions"><button className="secondary-button" onClick={onCancel}>Cancel</button><button className="primary-button" onClick={onConfirm}>{confirmLabel}</button></div></div></div>, document.body);
 }
 
 function AboutDialog({ automaticUpdates, onAutomaticUpdates, updateResult, checking, error, onCheck, onOpenRelease, onClose }) {
-  return <div className="modal-backdrop" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><div className="modal-heading"><div><h2 id="about-title">Panda Control</h2><p>Updates are checked through the public GitHub release page. Downloads and installation stay under your control.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={20} /></button></div><label className="update-check-option"><input type="checkbox" checked={automaticUpdates} onChange={event => onAutomaticUpdates(event.target.checked)} /><span><strong>Check weekly for updates</strong><small>Quietly checks while Panda Control is running.</small></span></label><div className="update-dialog-actions"><button type="button" className="secondary-button" onClick={onCheck} disabled={checking}>{checking ? <><Spinner />Checking…</> : 'Check for Updates'}</button>{updateResult?.updateAvailable && <button type="button" className="primary-button" onClick={() => onOpenRelease(updateResult.releaseUrl)}>Download {updateResult.latest}</button>}</div>{updateResult && !updateResult.updateAvailable && <p className="update-status" role="status">Panda Control {updateResult.current} is up to date.</p>}{error && <p className="form-error"><WarningCircle size={17} />{error}</p>}</div></div>;
+  const dialogRef = useRef(null);
+  useModalBehavior(dialogRef, onClose);
+  return createPortal(<div className="modal-backdrop" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div ref={dialogRef} tabIndex="-1" className="modal about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title"><div className="modal-heading"><div><h2 id="about-title">Panda Control</h2><p>Updates are checked through the public GitHub release page. Downloads and installation stay under your control.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={20} /></button></div><label className="update-check-option"><input type="checkbox" checked={automaticUpdates} onChange={event => onAutomaticUpdates(event.target.checked)} /><span><strong>Check weekly for updates</strong><small>Quietly checks while Panda Control is running.</small></span></label><div className="update-dialog-actions"><button type="button" className="secondary-button" onClick={onCheck} disabled={checking}>{checking ? <><Spinner />Checking…</> : 'Check for Updates'}</button>{updateResult?.updateAvailable && <button type="button" className="primary-button" onClick={() => onOpenRelease(updateResult.releaseUrl)}>Download {updateResult.latest}</button>}</div>{updateResult && !updateResult.updateAvailable && !updateResult.compatibilityIssue && <p className="update-status" role="status">Panda Control {updateResult.current} is up to date.</p>}{updateResult?.compatibilityIssue && <p className="form-error" role="status"><WarningCircle size={17} />Panda Control {updateResult.latest} does not include a download for this platform.</p>}{error && <p className="form-error"><WarningCircle size={17} />{error}</p>}</div></div>, document.body);
 }
 
 export function App() {
@@ -420,6 +537,7 @@ export function App() {
   const [states, setStates] = useState({});
   const [draft, setDraft] = useState(null);
   const [baseline, setBaseline] = useState(null);
+  const [draftOwnerKey, setDraftOwnerKey] = useState('');
   const [scanning, setScanning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -434,19 +552,35 @@ export function App() {
   const [toast, setToast] = useState(null);
   const [appearance, setAppearance] = useState(() => localStorage.getItem(APPEARANCE_KEY) || 'dark');
   const selected = devices.find(device => device.id === selectedId) || devices[0] || null;
-  const state = selected ? states[selected.id]?.data : null;
-  const error = selected ? states[selected.id]?.error : null;
-  const dirty = Boolean(draft && baseline && JSON.stringify(draft) !== JSON.stringify(baseline));
+  const selectedKey = deviceSessionKey(selected);
+  const selectedEntry = selected && states[selected.id]?.deviceKey === selectedKey ? states[selected.id] : null;
+  const state = selectedEntry?.data || null;
+  const error = selectedEntry?.error || null;
+  const online = Boolean(state && !error);
+  const connectionLabel = selected?.product === 'unknown' ? 'Unsupported' : error ? 'Offline' : state ? 'Online' : 'Connecting';
+  const dirty = Boolean(draft && baseline && draftOwnerKey === selectedKey && !draftsEquivalent(draft, baseline));
   const dirtyRef = useRef(dirty);
+  const selectedKeyRef = useRef(selectedKey);
+  const draftRef = useRef(draft);
+  const baselineRef = useRef(baseline);
+  const draftOwnerKeyRef = useRef(draftOwnerKey);
+  const savingRef = useRef(false);
+  const readSequenceRef = useRef(0);
+  const latestReadRef = useRef(new Map());
+  selectedKeyRef.current = selectedKey;
+  draftRef.current = draft;
+  baselineRef.current = baseline;
+  draftOwnerKeyRef.current = draftOwnerKey;
+  dirtyRef.current = dirty;
 
   useEffect(() => { document.documentElement.dataset.theme = appearance; localStorage.setItem(APPEARANCE_KEY, appearance); }, [appearance]);
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(devices)); if (!selectedId && devices[0]) setSelectedId(devices[0].id); }, [devices, selectedId]);
+  useEffect(() => { canvasRef.current?.scrollTo({ top: 0, left: 0 }); }, [selectedId]);
   useEffect(() => { localStorage.setItem(REMOVED_STORAGE_KEY, JSON.stringify([...removedIds])); }, [removedIds]);
-  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
   useEffect(() => { localStorage.setItem(AUTO_UPDATES_KEY, String(automaticUpdates)); }, [automaticUpdates]);
 
   const checkForUpdates = useCallback(async ({ automatic = false } = {}) => {
-    if (!automatic) { setCheckingUpdates(true); setUpdateError(''); }
+    if (!automatic) { setCheckingUpdates(true); setUpdateError(''); setUpdateResult(null); }
     try {
       const result = await deviceApi.checkForUpdates();
       setUpdateResult(result);
@@ -457,6 +591,7 @@ export function App() {
       }
       return result;
     } catch (problem) {
+      setUpdateResult(null);
       if (!automatic) setUpdateError(`Could not check for updates: ${ipcErrorMessage(problem)}`);
       return null;
     } finally { if (!automatic) setCheckingUpdates(false); }
@@ -484,26 +619,45 @@ export function App() {
   const scan = useCallback(async () => {
     setScanning(true);
     try { const found = await deviceApi.scanDevices(); mergeDevices(found); setToast({ kind: 'success', message: found.length ? `${found.length} Panda device${found.length === 1 ? '' : 's'} found` : 'No Panda devices found' }); }
-    catch (problem) { setToast({ kind: 'error', message: problem.message }); }
+    catch (problem) { setToast({ kind: 'error', message: ipcErrorMessage(problem) }); }
     finally { setScanning(false); }
   }, [mergeDevices]);
 
   const refresh = useCallback(async (device, updateDraft = false) => {
     if (!device || device.product === 'unknown') return;
+    if (savingRef.current) return null;
+    const requestKey = deviceSessionKey(device);
+    const requestId = ++readSequenceRef.current;
+    latestReadRef.current.set(device.id, requestId);
     try {
       const next = await deviceApi.readDeviceState(device);
-      setStates(current => ({ ...current, [device.id]: { data: next, error: null, updatedAt: Date.now() } }));
-      if (updateDraft || !dirtyRef.current) { const nextDraft = draftFromState(next); setDraft(nextDraft); setBaseline(nextDraft); }
+      if (!isLatestDeviceRequest(requestId, latestReadRef.current.get(device.id))) return null;
+      setStates(current => ({ ...current, [device.id]: { data: next, error: null, updatedAt: Date.now(), deviceKey: requestKey } }));
+      if (ownsActiveDraft(requestKey, selectedKeyRef.current) && (updateDraft || !dirtyRef.current)) {
+        const nextDraft = draftFromState(next);
+        setDraft(nextDraft);
+        setBaseline(nextDraft);
+        setDraftOwnerKey(requestKey);
+      }
       return next;
-    } catch (problem) { setStates(current => ({ ...current, [device.id]: { ...current[device.id], error: problem.message } })); throw problem; }
+    } catch (problem) {
+      const message = ipcErrorMessage(problem);
+      if (isLatestDeviceRequest(requestId, latestReadRef.current.get(device.id))) {
+        setStates(current => {
+          const previous = current[device.id]?.deviceKey === requestKey ? current[device.id] : {};
+          return { ...current, [device.id]: { ...previous, error: message, deviceKey: requestKey } };
+        });
+      }
+      throw new Error(message);
+    }
   }, []);
 
   useEffect(() => {
     if (!selected || selected.product === 'unknown') return;
-    setDraft(null); setBaseline(null); refresh(selected, true).catch(() => {});
+    setDraft(null); setBaseline(null); setDraftOwnerKey(''); refresh(selected, true).catch(() => {});
     const timer = setInterval(() => refresh(selected, false).catch(() => {}), 2500);
     return () => clearInterval(timer);
-  }, [selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedKey, refresh]); // selectedKey includes identity, product, and reconciled address
 
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(null), 3500); return () => clearTimeout(timer); }, [toast]);
 
@@ -544,6 +698,7 @@ export function App() {
     if (selected.product === 'control-vent') {
       const commands = [];
       if (JSON.stringify(draft.policy) !== JSON.stringify(baseline?.policy)) commands.push({ settings: draft.policy });
+      if (JSON.stringify(draft.filamentRules) !== JSON.stringify(baseline?.filamentRules)) commands.push({ filament: { rules: draft.filamentRules.filter(rule => rule.name.trim()) } });
       if (JSON.stringify(draft.lighting) !== JSON.stringify(baseline?.lighting)) commands.push({ lighting: draft.lighting });
       return commands;
     }
@@ -553,15 +708,49 @@ export function App() {
   }, [baseline, draft, selected]);
 
   const save = useCallback(async (extraCommands = []) => {
-    if (!selected || !draft) return;
+    if (!selected || !draft || draftOwnerKey !== selectedKey || savingRef.current) return null;
+    const operationDevice = { ...selected };
+    const operationKey = selectedKey;
+    const requestedDraft = structuredClone(draft);
+    const commands = [...buildCommands(), ...extraCommands];
+    savingRef.current = true;
     setSaving(true);
+    latestReadRef.current.set(operationDevice.id, ++readSequenceRef.current);
     try {
-      const next = await deviceApi.applyDeviceCommands({ ip: selected.ip, product: selected.product, commands: [...buildCommands(), ...extraCommands] });
-      setStates(current => ({ ...current, [selected.id]: { data: next, error: null, updatedAt: Date.now() } }));
-      const nextDraft = draftFromState(next); setDraft(nextDraft); setBaseline(nextDraft); setToast({ kind: 'success', message: 'Changes applied to the device' }); return next;
-    } catch (problem) { setToast({ kind: 'error', message: problem.message }); throw problem; }
-    finally { setSaving(false); }
-  }, [buildCommands, draft, selected]);
+      const next = await deviceApi.applyDeviceCommands({ ip: operationDevice.ip, product: operationDevice.product, commands });
+      const returnedDraft = draftFromState(next);
+      setStates(current => ({ ...current, [operationDevice.id]: { data: next, error: null, updatedAt: Date.now(), deviceKey: operationKey } }));
+      const active = ownsActiveDraft(operationKey, selectedKeyRef.current);
+      const replaceDraft = shouldReplaceDraftAfterSave({
+        operationKey,
+        activeKey: selectedKeyRef.current,
+        currentDraft: draftOwnerKeyRef.current === operationKey ? draftRef.current : null,
+        requestedDraft,
+        returnedDraft,
+      });
+      if (active) {
+        setBaseline(returnedDraft);
+        setDraftOwnerKey(operationKey);
+        if (replaceDraft) setDraft(returnedDraft);
+      }
+      if (!draftsEquivalent(requestedDraft, returnedDraft)) {
+        const message = 'The device returned different settings. Review the current values and save again.';
+        setToast({ kind: 'error', message });
+        throw new Error(message);
+      }
+      setToast({ kind: 'success', message: 'Changes applied to the device' });
+      return next;
+    } catch (problem) {
+      const message = ipcErrorMessage(problem);
+      if (message !== 'The device returned different settings. Review the current values and save again.') {
+        setToast({ kind: 'error', message });
+      }
+      throw new Error(message);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }, [buildCommands, draft, draftOwnerKey, selected, selectedKey]);
 
   const restoreDevice = device => {
     setRemovedIds(current => { const next = new Set(current); next.delete(device.id); if (device.hardwareId) next.delete(device.hardwareId); return next; });
@@ -578,41 +767,71 @@ export function App() {
     setRemovedIds(current => new Set([...current, removed.id, ...(removed.hardwareId ? [removed.hardwareId] : [])]));
     setDevices(remaining);
     setStates(current => { const next = { ...current }; delete next[removed.id]; return next; });
-    setSelectedId(remaining[0]?.id || null); setDraft(null); setBaseline(null); setConfirmRemove(false);
+    setSelectedId(remaining[0]?.id || null); setDraft(null); setBaseline(null); setDraftOwnerKey(''); setConfirmRemove(false);
     setToast({ kind: 'success', message: `${removed.name} removed` });
   };
 
   const resetStatus = async () => {
-    setConfirmReset(false); setSaving(true);
-    try { const next = await deviceApi.applyDeviceCommands({ ip: selected.ip, product: 'status', commands: [{ settings: { rgb_reset: 1 } }] }); setStates(current => ({ ...current, [selected.id]: { data: next, error: null } })); const nextDraft = draftFromState(next); setDraft(nextDraft); setBaseline(nextDraft); setToast({ kind: 'success', message: 'Lighting defaults restored' }); }
-    catch (problem) { setToast({ kind: 'error', message: problem.message }); }
-    finally { setSaving(false); }
+    if (!selected || savingRef.current) return;
+    const operationDevice = { ...selected };
+    const operationKey = selectedKey;
+    setConfirmReset(false);
+    savingRef.current = true;
+    setSaving(true);
+    latestReadRef.current.set(operationDevice.id, ++readSequenceRef.current);
+    try {
+      const next = await deviceApi.applyDeviceCommands({ ip: operationDevice.ip, product: 'status', commands: [{ settings: { rgb_reset: 1 } }] });
+      const nextDraft = draftFromState(next);
+      setStates(current => ({ ...current, [operationDevice.id]: { data: next, error: null, updatedAt: Date.now(), deviceKey: operationKey } }));
+      if (ownsActiveDraft(operationKey, selectedKeyRef.current)) {
+        setDraft(nextDraft); setBaseline(nextDraft); setDraftOwnerKey(operationKey);
+      }
+      setToast({ kind: 'success', message: 'Lighting defaults restored' });
+    } catch (problem) { setToast({ kind: 'error', message: ipcErrorMessage(problem) }); }
+    finally { savingRef.current = false; setSaving(false); }
   };
 
   const dryingToggle = async () => { try { await save([{ settings: { isrunning: state.drying ? 0 : 1 } }]); } catch (_) {} };
   const controlVentCommand = async command => {
+    if (!selected || savingRef.current) return;
+    const operationDevice = { ...selected };
+    const operationKey = selectedKey;
+    savingRef.current = true;
     setSaving(true);
+    latestReadRef.current.set(operationDevice.id, ++readSequenceRef.current);
     try {
-      const next = await deviceApi.applyDeviceCommands({ ip: selected.ip, product: 'control-vent', commands: [{ command }] });
-      setStates(current => ({ ...current, [selected.id]: { data: next, error: null, updatedAt: Date.now() } }));
-      const nextDraft = draftFromState(next); setDraft(nextDraft); setBaseline(nextDraft); setToast({ kind: 'success', message: 'Vent command applied' });
-    } catch (problem) { setToast({ kind: 'error', message: problem.message }); }
-    finally { setSaving(false); }
+      const next = await deviceApi.applyDeviceCommands({ ip: operationDevice.ip, product: 'control-vent', commands: [{ command }] });
+      const nextDraft = draftFromState(next);
+      setStates(current => ({ ...current, [operationDevice.id]: { data: next, error: null, updatedAt: Date.now(), deviceKey: operationKey } }));
+      if (shouldReplaceDraftAfterCommand({
+        operationKey,
+        activeKey: selectedKeyRef.current,
+        currentDraft: draftOwnerKeyRef.current === operationKey ? draftRef.current : null,
+        baseline: draftOwnerKeyRef.current === operationKey ? baselineRef.current : null,
+      })) {
+        setDraft(nextDraft); setBaseline(nextDraft); setDraftOwnerKey(operationKey);
+      }
+      if (!controlVentCommandSatisfied(command, next)) {
+        setToast({ kind: 'error', message: 'The vent did not confirm the requested control mode.' });
+        return;
+      }
+      setToast({ kind: 'success', message: 'Vent command applied' });
+    } catch (problem) { setToast({ kind: 'error', message: ipcErrorMessage(problem) }); }
+    finally { savingRef.current = false; setSaving(false); }
   };
 
   return (
     <div className="app-shell" ref={canvasRef}>
       <header className="topbar">
-        <div className="brand-block"><strong>Panda Control</strong><span>An <button onClick={() => deviceApi.openWebsite()}>Extrusion Therapy</button> workshop tool</span></div>
+        <div className="brand-block"><div className="brand-title-row"><strong>Panda Control</strong><button type="button" className="brand-about-button" onClick={() => setAboutOpen(true)} aria-label="About and updates"><Info size={17} /></button></div><span>An <button onClick={() => deviceApi.openWebsite()}>Extrusion Therapy</button> workshop tool</span></div>
         <nav className="device-tabs" aria-label="Panda devices">
-          {devices.map(device => <button key={device.id} className={device.id === selected?.id ? 'selected' : ''} onClick={() => setSelectedId(device.id)}><i className={states[device.id]?.error ? 'offline' : ''} /><span>{device.name}</span></button>)}
+          {devices.map(device => <button key={device.id} aria-pressed={device.id === selected?.id} className={device.id === selected?.id ? 'selected' : ''} onClick={() => setSelectedId(device.id)}><i className={states[device.id]?.deviceKey === deviceSessionKey(device) && states[device.id]?.error ? 'offline' : ''} /><span>{device.name}</span></button>)}
           {!devices.length && <span className="empty-tabs">No devices yet</span>}
         </nav>
         <div className="toolbar-actions">
-          {selected && <span className={`toolbar-status ${error ? 'offline' : ''}`}><i />{error ? 'Offline' : 'Online'}</span>}
+          {selected && <span className={`toolbar-status ${error ? 'offline' : ''}`}><i />{connectionLabel}</span>}
           <AppButton icon={scanning ? Spinner : ArrowsClockwise} onClick={scan} disabled={scanning} aria-label={scanning ? 'Scanning for devices' : 'Scan for devices'}>{scanning ? 'Scanning' : 'Scan'}</AppButton>
           <AppButton icon={Plus} onClick={() => setAddOpen(true)} aria-label="Add a device">Add</AppButton>
-          <AppButton icon={Info} onClick={() => setAboutOpen(true)} aria-label="About and updates">About</AppButton>
           <button className="appearance-button" onClick={() => setAppearance(current => current === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${appearance === 'dark' ? 'light' : 'dark'} mode`}>{appearance === 'dark' ? <Moon size={18} /> : <Sun size={18} />}<span>{appearance === 'dark' ? 'Dark' : 'Light'}</span><CaretDown size={13} /></button>
           <button className="save-button" onClick={() => save().catch(() => {})} disabled={!dirty || saving || !state}>{saving ? <Spinner /> : <Check size={17} weight="bold" />}Save</button>
         </div>
@@ -621,11 +840,11 @@ export function App() {
         {!selected ? (
           <section className="empty-state"><SlidersHorizontal size={42} weight="duotone" /><h1>Find your Panda devices</h1><p>Scan this network or add the IP address of a device that is already set up.</p><div><AppButton icon={ArrowsClockwise} onClick={scan}>Scan Network</AppButton><AppButton icon={Plus} onClick={() => setAddOpen(true)}>Add IP</AppButton></div></section>
         ) : selected.product === 'unknown' ? <UnsupportedPanel device={selected} onRemove={() => setConfirmRemove(true)} /> : !state || !draft || state.product !== selected.product || draft.product !== selected.product ? (
-          <section className="loading-state">{error ? <><WarningCircle size={34} /><h2>Device unavailable</h2><p>{error}</p><div className="unavailable-actions"><AppButton icon={ArrowsClockwise} onClick={() => refresh(selected, true)}>Try Again</AppButton><AppButton icon={Trash} className="remove-device-button" onClick={() => setConfirmRemove(true)}>Remove Device</AppButton></div></> : <><Spinner size={30} /><p>Reading {selected.name}…</p></>}</section>
+          <section className="loading-state">{error ? <><WarningCircle size={34} /><h2>Device unavailable</h2><p>{error}</p><div className="unavailable-actions"><AppButton icon={ArrowsClockwise} onClick={() => refresh(selected, true).catch(() => {})}>Try Again</AppButton><AppButton icon={Trash} className="remove-device-button" onClick={() => setConfirmRemove(true)}>Remove Device</AppButton></div></> : <><Spinner size={30} /><p>Reading {selected.name}…</p></>}</section>
         ) : <>
-          {selected.product === 'status' ? <StatusPanel state={state} draft={draft} setDraft={setDraft} onReset={() => setConfirmReset(true)} /> : selected.product === 'breath' ? <BreathPanel state={state} draft={draft} setDraft={setDraft} onDryingToggle={dryingToggle} busy={saving} /> : selected.product === 'control-vent' ? <ControlVentPanel state={state} draft={draft} setDraft={setDraft} onCommand={controlVentCommand} busy={saving} /> : <VentPanel draft={draft} setDraft={setDraft} />}
+          {selected.product === 'status' ? <StatusPanel state={state} draft={draft} setDraft={setDraft} onReset={() => setConfirmReset(true)} online={online} /> : selected.product === 'breath' ? <BreathPanel state={state} draft={draft} setDraft={setDraft} onDryingToggle={dryingToggle} busy={saving} online={online} /> : selected.product === 'control-vent' ? <ControlVentPanel state={state} draft={draft} setDraft={setDraft} onCommand={controlVentCommand} busy={saving} online={online} /> : <VentPanel draft={draft} setDraft={setDraft} online={online} />}
           <section className={`device-info ${infoOpen ? 'open' : ''}`}><button onClick={() => setInfoOpen(current => !current)}>{infoOpen ? <CaretDown size={20} /> : <CaretRight size={20} />}<span>Device Information</span></button>
-            {infoOpen && <div className="device-info-body"><div><span>IP Address</span><strong>{selected.ip}</strong></div><div><span>Firmware</span><strong>{state.firmware || 'Unknown'}</strong></div><div><span>Profile</span><strong>{selected.product === 'status' ? 'Panda Status' : selected.product === 'breath' ? 'Panda Breath' : selected.product === 'control-vent' ? 'Panda Control Vent' : 'Panda Vent'}</strong></div><AppButton icon={SlidersHorizontal} onClick={() => deviceApi.openDevicePage(selected.ip)}>Open Original Interface</AppButton><AppButton icon={Trash} className="remove-device-button" onClick={() => setConfirmRemove(true)}>Remove Device</AppButton></div>}
+            {infoOpen && <div className="device-info-body"><div><span>IP address</span><strong>{selected.product === 'control-vent' ? state.wifiIp || selected.ip : selected.ip}</strong></div><div><span>Firmware</span><strong>{state.firmware || 'Unknown'}</strong></div>{selected.product === 'control-vent' && <><div><span>Wi-Fi</span><strong>{state.wifiState || '—'}</strong></div><div><span>Motor groups</span><strong>{state.motorGroups ?? '—'}</strong></div></>}<div><span>Profile</span><strong>{selected.product === 'status' ? 'Panda Status' : selected.product === 'breath' ? 'Panda Breath' : selected.product === 'control-vent' ? 'Panda Control Vent' : 'Panda Vent'}</strong></div><AppButton icon={SlidersHorizontal} onClick={() => deviceApi.openDevicePage(selected.ip)}>Open Original Interface</AppButton><AppButton icon={Trash} className="remove-device-button" onClick={() => setConfirmRemove(true)}>Remove Device</AppButton></div>}
           </section>
         </>}
       </main>
@@ -633,7 +852,7 @@ export function App() {
       {confirmReset && <ConfirmDialog title="Restore lighting defaults?" body="This resets Panda Status lighting modes, brightness, and colors. Network and printer setup are not affected." confirmLabel="Restore Defaults" onCancel={() => setConfirmReset(false)} onConfirm={resetStatus} />}
       {confirmRemove && <ConfirmDialog title={`Remove ${selected?.name || 'device'}?`} body="This removes the device from Panda Control only. It does not change the device, its network setup, or its printer connection." confirmLabel="Remove Device" onCancel={() => setConfirmRemove(false)} onConfirm={removeDevice} />}
       {aboutOpen && <AboutDialog automaticUpdates={automaticUpdates} onAutomaticUpdates={setAutomaticUpdates} updateResult={updateResult} checking={checkingUpdates} error={updateError} onCheck={() => checkForUpdates()} onOpenRelease={url => deviceApi.openRelease(url)} onClose={() => setAboutOpen(false)} />}
-      {toast && <div className={`toast ${toast.kind}`} role="status">{toast.kind === 'success' ? <Check size={18} /> : <WarningCircle size={18} />}{toast.message}{toast.action && <button type="button" onClick={() => deviceApi.openRelease(toast.releaseUrl)}>{toast.action}</button>}</div>}
+      {toast && createPortal(<div className={`toast ${toast.kind}`} role="status">{toast.kind === 'success' ? <Check size={18} /> : <WarningCircle size={18} />}{toast.message}{toast.action && <button type="button" onClick={() => deviceApi.openRelease(toast.releaseUrl)}>{toast.action}</button>}</div>, document.body)}
     </div>
   );
 }
