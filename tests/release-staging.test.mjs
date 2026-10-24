@@ -10,7 +10,9 @@ const execFileAsync = promisify(execFile);
 const projectRoot = new URL('..', import.meta.url).pathname;
 const script = join(projectRoot, 'scripts', 'stage-release-assets.sh');
 
-test('release staging creates byte-identical stable assets and checksums on macOS Bash', async () => {
+test('release staging creates byte-identical stable assets and checksums on Unix Bash', {
+  skip: process.platform === 'win32' ? 'The release staging utility is a Unix shell script.' : false,
+}, async () => {
   const stage = await mkdtemp(join(tmpdir(), 'panda-control-stage-test-'));
   const version = '9.8.7';
   const assets = [
