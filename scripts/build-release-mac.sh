@@ -19,8 +19,8 @@ if [[ -z "$signing_identity" ]]; then
 fi
 
 cd "$project_dir"
-npm run test
 npm run build
+npm run test
 CSC_NAME="$signing_identity" ./node_modules/.bin/electron-builder --mac dmg --arm64
 
 version="$(node -p "require('./package.json').version")"

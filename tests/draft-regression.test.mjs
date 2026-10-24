@@ -149,6 +149,11 @@ test('write responses are scoped to their originating device and verified before
 
 test('Windows packages use the Panda Control icon and x64 NSIS installer', () => {
   assert.match(packageConfig.scripts['dist:win'], /--win nsis --x64/);
+  assert.ok(
+    packageConfig.scripts['dist:win'].indexOf('npm run build') <
+      packageConfig.scripts['dist:win'].indexOf('npm run test'),
+    'Windows packaging must build Sites output before testing generated artifacts',
+  );
   assert.equal(packageConfig.build.win.icon, 'build/icon.ico');
 });
 
@@ -160,6 +165,11 @@ test('Linux packages use the Panda Control icon and ship AppImage plus DEB', () 
   assert.deepEqual(packageConfig.build.linux.target, ['AppImage', 'deb']);
   assert.match(packageConfig.scripts['dist:linux'], /--linux AppImage --x64/);
   assert.match(packageConfig.scripts['dist:linux'], /build-linux-deb-native\.sh/);
+  assert.ok(
+    packageConfig.scripts['dist:linux'].indexOf('npm run build') <
+      packageConfig.scripts['dist:linux'].indexOf('npm run test'),
+    'Linux packaging must build Sites output before testing generated artifacts',
+  );
 });
 
 test('release packages include third-party notices', () => {
