@@ -20,6 +20,15 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run dist:win
+      - name: Smoke-test Windows application
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "release\win-unpacked\Panda Control.exe" -ArgumentList "--disable-gpu" -PassThru
+          Start-Sleep -Seconds 8
+          if ($process.HasExited) {
+            throw "Panda Control exited during the Windows launch smoke test."
+          }
+          Stop-Process -Id $process.Id
       - name: Stage Windows installer
         shell: pwsh
         run: |
@@ -44,6 +53,29 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run dist:linux
+      - name: Smoke-test Linux AppImage and DEB
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y xvfb "./release/Panda-Control-$(node -p "require('./package.json').version")-Linux-amd64.deb"
+
+          smoke_launch() {
+            "$@" >/tmp/panda-control-smoke.log 2>&1 &
+            pid=$!
+            sleep 8
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat /tmp/panda-control-smoke.log
+              echo "Panda Control exited during the Linux launch smoke test." >&2
+              exit 1
+            fi
+            kill "$pid"
+            wait "$pid" 2>/dev/null || true
+          }
+
+          version="$(node -p "require('./package.json').version")"
+          APPIMAGE_EXTRACT_AND_RUN=1 smoke_launch xvfb-run -a "./release/Panda-Control-${version}-Linux-x86_64.AppImage" --no-sandbox --disable-gpu
+          smoke_launch xvfb-run -a /opt/panda-control/panda-control --no-sandbox --disable-gpu
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: panda-control-linux-x64

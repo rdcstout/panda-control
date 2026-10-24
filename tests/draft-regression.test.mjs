@@ -174,6 +174,13 @@ test('Linux packages use the Panda Control icon and ship AppImage plus DEB', () 
   );
 });
 
+test('native package workflow launch-smokes Windows, AppImage, and DEB builds', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/package-desktop.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /release\\win-unpacked\\Panda Control\.exe/);
+  assert.match(workflow, /APPIMAGE_EXTRACT_AND_RUN=1 smoke_launch/);
+  assert.match(workflow, /\/opt\/panda-control\/panda-control/);
+});
+
 test('release packages include third-party notices', () => {
   assert.deepEqual(packageConfig.build.extraResources, [{
     from: 'docs/THIRD_PARTY_NOTICES.md',
