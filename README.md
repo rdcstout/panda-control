@@ -51,3 +51,7 @@ Panda Control is free. If it helps in your shop, you can optionally [support fut
 ## Independent utility
 
 Panda Control is an independent community utility created by Extrusion Therapy. It is not affiliated with or endorsed by BIQU or BIGTREETECH.
+
+## Contribution and security policies
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for changes and validation, and [SECURITY.md](SECURITY.md) for reporting suspected vulnerabilities.
