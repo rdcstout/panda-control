@@ -16,14 +16,12 @@ import {
   ipcErrorMessage,
   isLatestDeviceRequest,
   ownsActiveDraft,
-  parseRemovedDeviceIds,
   parseSavedDevices,
   shouldReplaceDraftAfterCommand,
   shouldReplaceDraftAfterSave,
 } from './appState';
 
 const STORAGE_KEY = 'panda-control-devices-v1';
-const REMOVED_STORAGE_KEY = 'panda-control-removed-devices-v1';
 const APPEARANCE_KEY = 'panda-control-appearance-v1';
 const AUTO_UPDATES_KEY = 'panda-control-auto-updates-v1';
 const LAST_UPDATE_CHECK_KEY = 'panda-control-last-update-check-v1';
@@ -31,10 +29,6 @@ const LAST_NOTIFIED_UPDATE_KEY = 'panda-control-last-notified-update-v1';
 
 function readSavedDevices() {
   return parseSavedDevices(localStorage.getItem(STORAGE_KEY));
-}
-
-function readRemovedDevices() {
-  return parseRemovedDeviceIds(localStorage.getItem(REMOVED_STORAGE_KEY));
 }
 
 const rgbaToHex = value => /^#[0-9a-f]{8}$/i.test(value || '') ? value.slice(0, 7) : '#ffffff';
@@ -532,7 +526,6 @@ export function App() {
   useInterfaceScale(canvasRef);
   const initialDevices = readSavedDevices();
   const [devices, setDevices] = useState(initialDevices);
-  const [removedIds, setRemovedIds] = useState(readRemovedDevices);
   const [selectedId, setSelectedId] = useState(initialDevices[0]?.id || null);
   const [states, setStates] = useState({});
   const [draft, setDraft] = useState(null);
@@ -576,7 +569,6 @@ export function App() {
   useEffect(() => { document.documentElement.dataset.theme = appearance; localStorage.setItem(APPEARANCE_KEY, appearance); }, [appearance]);
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(devices)); if (!selectedId && devices[0]) setSelectedId(devices[0].id); }, [devices, selectedId]);
   useEffect(() => { canvasRef.current?.scrollTo({ top: 0, left: 0 }); }, [selectedId]);
-  useEffect(() => { localStorage.setItem(REMOVED_STORAGE_KEY, JSON.stringify([...removedIds])); }, [removedIds]);
   useEffect(() => { localStorage.setItem(AUTO_UPDATES_KEY, String(automaticUpdates)); }, [automaticUpdates]);
 
   const checkForUpdates = useCallback(async ({ automatic = false } = {}) => {
@@ -611,10 +603,9 @@ export function App() {
   }, [automaticUpdates, checkForUpdates]);
 
   const mergeDevices = useCallback(incoming => {
-    const allowed = incoming.filter(device => !removedIds.has(device.id) && !removedIds.has(device.hardwareId));
-    setDevices(current => reconcileDevices(current, allowed).devices);
-    if (!selectedId && allowed[0]) setSelectedId(allowed[0].id);
-  }, [removedIds, selectedId]);
+    setDevices(current => reconcileDevices(current, incoming).devices);
+    if (!selectedId && incoming[0]) setSelectedId(incoming[0].id);
+  }, [selectedId]);
 
   const scan = useCallback(async () => {
     setScanning(true);
@@ -753,7 +744,6 @@ export function App() {
   }, [buildCommands, draft, draftOwnerKey, selected, selectedKey]);
 
   const restoreDevice = device => {
-    setRemovedIds(current => { const next = new Set(current); next.delete(device.id); if (device.hardwareId) next.delete(device.hardwareId); return next; });
     const existing = devices.find(item => deviceIdentityMatches(item, device));
     setDevices(current => reconcileDevices(current, [device]).devices);
     setSelectedId(existing?.id || device.id);
@@ -764,7 +754,6 @@ export function App() {
     if (!selected) return;
     const removed = selected;
     const remaining = devices.filter(device => device.id !== removed.id);
-    setRemovedIds(current => new Set([...current, removed.id, ...(removed.hardwareId ? [removed.hardwareId] : [])]));
     setDevices(remaining);
     setStates(current => { const next = { ...current }; delete next[removed.id]; return next; });
     setSelectedId(remaining[0]?.id || null); setDraft(null); setBaseline(null); setDraftOwnerKey(''); setConfirmRemove(false);

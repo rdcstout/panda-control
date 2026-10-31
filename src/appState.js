@@ -23,13 +23,6 @@ export function parseSavedDevices(rawValue) {
   });
 }
 
-export function parseRemovedDeviceIds(rawValue) {
-  let parsed;
-  try { parsed = JSON.parse(rawValue || '[]'); } catch (_) { return new Set(); }
-  if (!Array.isArray(parsed)) return new Set();
-  return new Set(parsed.filter(value => typeof value === 'string' && value));
-}
-
 export function deviceSessionKey(device) {
   if (!device) return '';
   return `${device.id}\u0000${device.product}\u0000${device.ip}`;

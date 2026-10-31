@@ -2,11 +2,13 @@
 
 ## Current release
 
-Panda Control 0.1.4 supports normal operational control of Panda Status, Panda Breath, stock Panda Vent, and Panda Control Vent firmware on macOS, Windows, and 64-bit x86 Linux.
+Panda Control 0.1.5 supports normal operational control of Panda Status, Panda Breath, stock Panda Vent, and Panda Control Vent firmware on macOS, Windows, and 64-bit x86 Linux.
 
 Panda Control is for everyday operation after the accessory has been set up. Initial device setup remains in each accessory's own interface.
 
 ## Future work
+
+- Explicit Scan adds supported devices missing from the saved list, including previously removed devices, while reconciling existing devices without duplicates.
 
 - Evaluate additional Panda products only after their operational protocol is mapped and verified on real hardware.
 - Continue accessibility, reliability, and platform-compatibility improvements as useful issues are reproduced.

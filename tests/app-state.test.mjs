@@ -7,7 +7,6 @@ import {
   ipcErrorMessage,
   isLatestDeviceRequest,
   ownsActiveDraft,
-  parseRemovedDeviceIds,
   parseSavedDevices,
   shouldReplaceDraftAfterCommand,
   shouldReplaceDraftAfterSave,
@@ -26,11 +25,6 @@ test('persisted devices reject malformed records and duplicate identities', () =
   ]);
   assert.deepEqual(parseSavedDevices('{broken'), []);
   assert.deepEqual(parseSavedDevices(JSON.stringify({ id: 'not-an-array' })), []);
-});
-
-test('persisted removed-device identities retain only non-empty strings', () => {
-  assert.deepEqual([...parseRemovedDeviceIds(JSON.stringify(['one', '', 2, null, 'two', 'one']))], ['one', 'two']);
-  assert.deepEqual([...parseRemovedDeviceIds('{broken')], []);
 });
 
 test('device sessions change when a reconciled address or product changes', () => {

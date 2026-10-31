@@ -49,3 +49,14 @@ test('the add-device view recognizes a known MAC after its IP changes', () => {
   const found = device('control-vent', '192.168.1.70', 'mac:02:00:00:00:00:50');
   assert.equal(isKnownDevice([saved], found), true);
 });
+
+test('remove, scan, save and rescan restores a device once even after its address changes', () => {
+  const status = device('status', '192.168.1.34', 'mac:02:00:00:00:00:40');
+  const oldVent = device('control-vent', '192.168.1.94', 'mac:02:00:00:00:00:50');
+  const saved = [status, oldVent].filter(item => item.id !== oldVent.id);
+  const foundVent = device('control-vent', '192.168.1.95', oldVent.hardwareId);
+  const restored = reconcileDevices(saved, [status, foundVent]).devices;
+  assert.deepEqual(restored, [status, foundVent]);
+  const relaunched = JSON.parse(JSON.stringify(restored));
+  assert.deepEqual(reconcileDevices(relaunched, [status, foundVent]).devices, restored);
+});

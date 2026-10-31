@@ -30,11 +30,9 @@ test('live polling uses current dirty state and does not overwrite unsaved edits
   assert.match(appSource, /\[selectedKey, refresh\]/);
 });
 
-test('removed devices stay ignored by automatic scans and can be explicitly restored', () => {
-  assert.match(appSource, /panda-control-removed-devices-v1/);
-  assert.match(appSource, /incoming\.filter\(device => !removedIds\.has\(device\.id\) && !removedIds\.has\(device\.hardwareId\)\)/);
-  assert.match(appSource, /next\.delete\(device\.id\)/);
-  assert.match(appSource, /removed\.hardwareId/);
+test('explicit scans reconcile all discoveries without a removed-device blacklist', () => {
+  assert.doesNotMatch(appSource, /removedIds|setRemovedIds|panda-control-removed-devices-v1/);
+  assert.match(appSource, /reconcileDevices\(current, incoming\)/);
   assert.match(appSource, /Remove Device/);
 });
 
