@@ -25,6 +25,7 @@ async function main() {
   }
   try {
     let page = await launch();
+    await page.waitForFunction(() => localStorage.getItem('panda-control-devices-v1') !== null);
     await page.evaluate(({ status, vent }) => {
       localStorage.setItem('panda-control-devices-v1', JSON.stringify([status]));
       localStorage.setItem('panda-control-removed-devices-v1', JSON.stringify([vent.id, vent.hardwareId]));
