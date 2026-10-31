@@ -438,7 +438,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgba(255, 76, 70,
 .device-add-button, .device-added-button { min-height: 35px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; font-weight: 700; }
 .device-add-button { border: 1px solid var(--line-strong); background: var(--surface-raised); color: var(--text); cursor: pointer; box-shadow: 0 3px 9px rgba(0, 0, 0, 0.16); }
 .device-add-button:hover:not(:disabled) { border-color: rgba(238, 51, 47, 0.48); background: var(--surface-hover); }
-.device-added-button { border: 1px solid rgba(50, 210, 103, 0.2); background: rgba(50, 210, 103, 0.08); color: var(--success); }
+.device-added-button { border: 1px solid rgba(50, 210, 103, 0.2); background: rgba(50, 210, 103, 0.08); color: var(--success); cursor: pointer; }
 .device-add-button:disabled, .device-added-button:disabled { cursor: default; opacity: 0.78; }
 .discovery-empty { min-height: 112px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: var(--text-tertiary); text-align: center; }
 .discovery-empty strong { color: var(--text-secondary); font-size: 13px; }

@@ -1,6 +1,6 @@
 {
   "name": "panda-control",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A free Extrusion Therapy workshop tool for managing installed BIQU Panda accessories.",
   "desktopName": "panda-control",
   "author": "Extrusion Therapy",

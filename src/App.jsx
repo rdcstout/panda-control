@@ -479,7 +479,7 @@ function AddDeviceDialog({ onClose, onAdd, onAddDiscovered, knownDevices }) {
   const submit = async event => { event.preventDefault(); setBusy(true); setError(''); try { await onAdd(value); onClose(); } catch (problem) { setError(ipcErrorMessage(problem)); } finally { setBusy(false); } };
   const addFound = async device => {
     setAddingId(device.id);
-    try { await onAddDiscovered(device); }
+    try { await onAddDiscovered(device); onClose(); }
     catch (problem) { setSearchError(ipcErrorMessage(problem)); }
     finally { setAddingId(null); }
   };
@@ -497,7 +497,7 @@ function AddDeviceDialog({ onClose, onAdd, onAddDiscovered, knownDevices }) {
           {searching && !results.length ? <div className="discovery-empty"><Spinner size={24} /><strong>Searching your network</strong><span>Looking for supported Panda products…</span></div> : searchError ? <div className="discovery-empty error"><WarningCircle size={25} /><strong>Search unavailable</strong><span>{searchError}</span></div> : !results.length ? <div className="discovery-empty"><SlidersHorizontal size={25} /><strong>No Panda devices found</strong><span>Make sure the device is powered on and connected to this network.</span></div> : results.map(device => {
             const added = isKnownDevice(knownDevices, device);
             const supported = device.product !== 'unknown';
-            return <div className="discovered-device" key={device.id}><span className="device-glyph"><SlidersHorizontal size={22} /></span><div className="discovered-identity"><strong>{device.name}</strong><span>{device.ip}</span></div><span className="discovered-online"><i />Online</span><button type="button" className={added ? 'device-added-button' : 'device-add-button'} disabled={added || !supported || addingId === device.id} onClick={() => addFound(device)}>{addingId === device.id ? <Spinner size={16} /> : added ? <Check size={16} /> : <Plus size={16} />}{!supported ? 'Unsupported' : added ? 'Added' : 'Add'}</button></div>;
+            return <div className="discovered-device" key={device.id}><span className="device-glyph"><SlidersHorizontal size={22} /></span><div className="discovered-identity"><strong>{device.name}</strong><span>{device.ip}</span></div><span className="discovered-online"><i />Online</span><button type="button" className={added ? 'device-added-button' : 'device-add-button'} aria-label={`${added ? 'Open' : 'Add'} ${device.name}`} disabled={!supported || addingId === device.id} onClick={() => addFound(device)}>{addingId === device.id ? <Spinner size={16} /> : added ? <Check size={16} /> : <Plus size={16} />}{!supported ? 'Unsupported' : added ? 'Open' : 'Add'}</button></div>;
           })}
         </div>
         <div className="manual-divider"><span>Or add by address</span></div>
@@ -749,7 +749,7 @@ export function App() {
     setSelectedId(existing?.id || device.id);
   };
   const addDevice = async value => { const device = await deviceApi.probeDevice(value); restoreDevice(device); setToast({ kind: 'success', message: `${device.name} added` }); };
-  const addDiscoveredDevice = async device => { restoreDevice(device); setToast({ kind: 'success', message: `${device.name} added` }); };
+  const addDiscoveredDevice = async device => { const existing = devices.some(item => deviceIdentityMatches(item, device)); restoreDevice(device); setToast({ kind: 'success', message: `${device.name} ${existing ? 'opened' : 'added'}` }); };
   const removeDevice = () => {
     if (!selected) return;
     const removed = selected;
