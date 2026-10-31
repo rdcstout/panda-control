@@ -13,7 +13,7 @@ async function main() {
   const found = { ...saved, ip: '192.0.2.22' };
   let instance;
   try {
-    instance = await _electron.launch({ executablePath, args: [...(process.argv[3] ? [process.argv[3]] : []), `--user-data-dir=${profile}`, '--disable-gpu'], timeout: 60000 });
+    instance = await _electron.launch({ executablePath, args: [...(process.argv[3] ? [process.argv[3]] : []), `--user-data-dir=${profile}`, '--disable-gpu', ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], timeout: 60000 });
     await instance.evaluate(({ ipcMain }, discovered) => {
       ipcMain.removeHandler('panda:scan');
       ipcMain.handle('panda:scan', () => [discovered]);

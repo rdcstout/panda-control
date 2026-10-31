@@ -45,6 +45,8 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
           node scripts/verify-packaged-scan.cjs "$installDir\Panda Control.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/verify-packaged-device-recovery.cjs "$installDir\Panda Control.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install and verify Linux DEB candidate
         if: runner.os == 'Linux'
         env:
@@ -54,6 +56,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb ./candidates/panda-control-linux-x64/*.deb
           xvfb-run -a node scripts/verify-packaged-scan.cjs /opt/panda-control/panda-control
+          xvfb-run -a node scripts/verify-packaged-device-recovery.cjs /opt/panda-control/panda-control
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
