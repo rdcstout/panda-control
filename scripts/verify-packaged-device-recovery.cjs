@@ -21,11 +21,15 @@ async function main() {
       ipcMain.handle('panda:state', () => { throw new Error('Synthetic disconnected state'); });
     }, found);
     const page = await instance.firstWindow();
+    // Let the initial renderer persistence effect finish before seeding the
+    // fixture, otherwise a slow first mount can overwrite it with an empty list.
+    await page.waitForFunction(() => localStorage.getItem('panda-control-devices-v1') !== null);
     await page.evaluate(device => {
       localStorage.setItem('panda-control-devices-v1', JSON.stringify([device]));
       localStorage.setItem('panda-control-auto-updates-v1', 'false');
     }, saved);
     await page.reload();
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('panda-control-devices-v1'))), [saved], 'The saved-device fixture must survive reload before testing discovery');
     await page.getByRole('button', { name: 'Add a device', exact: true }).click();
     const action = page.getByRole('button', { name: 'Open Panda C Vent', exact: true });
     await action.waitFor({ timeout: 5000 });
