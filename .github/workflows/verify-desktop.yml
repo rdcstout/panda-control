@@ -1,0 +1,62 @@
+name: Verify installed desktop packages
+on:
+  workflow_dispatch:
+    inputs:
+      package_run:
+        description: Successful packaging run ID to verify
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Download the exact candidate packages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_RUN: ${{ inputs.package_run }}
+        run: |
+          gh run view "$PACKAGE_RUN" --json conclusion --jq .conclusion | grep -qx success
+          gh run download "$PACKAGE_RUN" --dir candidates
+          npm install --prefix .package-test-driver --no-save --ignore-scripts --package-lock=false playwright-core@1.64.1
+      - name: Install and verify Windows candidate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PANDA_PLAYWRIGHT_MODULE: ${{ github.workspace }}/.package-test-driver/node_modules/playwright-core
+          PANDA_SCAN_SCREENSHOT: windows-scan.png
+        run: |
+          $installer = (Get-ChildItem candidates/panda-control-windows-x64/*.exe).FullName
+          $installDir = "$env:RUNNER_TEMP\PandaControlVerification"
+          $process = Start-Process -FilePath $installer -ArgumentList "/S", "/D=$installDir" -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          node scripts/verify-packaged-scan.cjs "$installDir\Panda Control.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install and verify Linux DEB candidate
+        if: runner.os == 'Linux'
+        env:
+          PANDA_PLAYWRIGHT_MODULE: ${{ github.workspace }}/.package-test-driver/node_modules/playwright-core
+          PANDA_SCAN_SCREENSHOT: linux-scan.png
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb ./candidates/panda-control-linux-x64/*.deb
+          xvfb-run -a node scripts/verify-packaged-scan.cjs /opt/panda-control/panda-control
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: installed-package-proof-${{ runner.os }}
+          path: '*-scan.png'
+          if-no-files-found: ignore
